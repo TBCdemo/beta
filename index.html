@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TBC 主日服事查詢系統</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.22.20/babel.min.js"></script>
+
+    <!-- 加入 Supabase 的函式庫 -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react,react-dom",
+            "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
+        }
+    }
+    </script>
+
+    <style>
+        body { background-color: #f8fafc; font-family: sans-serif; }
+        .animate-in { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            const root = document.getElementById('root');
+            if(root) {
+                root.innerHTML = `<div style="color:red; background:#fee; padding:20px; margin:20px; border-radius:10px; font-family:sans-serif;"><h3>❌ 應用程式錯誤</h3><p><strong>錯誤訊息:</strong> ${msg}</p><p>請檢查程式碼 import 是否完整。</p></div>`;
+            }
+            return false;
+        };
+    </script>
+
+    <script type="text/babel" data-type="module" data-presets="react">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+          Calendar, User, LogOut, Heart, Monitor, Users, Smile, BookOpen, 
+          Coffee, RefreshCw, AlertCircle, ArrowLeft, UserCheck, HandHeart, 
+          Clock, Briefcase, Info, Lock, Unlock, Link as LinkIcon, X, Timer, UserX, CalendarPlus
+        } from 'lucide-react';
+        import { createClient } from '@supabase/supabase-js';
+
+        // --- Supabase 初始化設定 ---
+        const SUPABASE_URL = "https://jcepavwocdujoeoqxvsd.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_Tj2n8e3yY1HyvaFzXRyO_w_PWrVFB7E";
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        // --- 核心權限判斷邏輯 ---
+        const checkIsOpen = () => {
+            if (typeof window === 'undefined') return false;
+            const params = new URLSearchParams(window.location.search);
+            const auth = params.get('auth');
+            if (auth) {
+                try {
+                    const decoded = atob(auth);
+                    const data = JSON.parse(decoded);
+                    if (data.exp && Date.now() < data.exp) return true;
+                } catch (e) { console.error("無效的金鑰"); }
+            }
+            const mode = params.get('mode');
+            if (mode === 'close') return false; 
+            return false;
+        };
+
+        const ENABLE_PRE_SCHEDULE = checkIsOpen();
+
+        // --- 儲存輔助函式 ---
+        const setLocalData = (key, value) => {
+            if (typeof window === 'undefined') return;
+            try { localStorage.setItem(key, value); } catch (e) { }
+            try {
+                const date = new Date();
+                date.setTime(date.getTime() + (30 * 24 * 60 * 60 * 1000)); 
+                document.cookie = `${key}=${encodeURIComponent(value)}; expires=${date.toUTCString()}; path=/`;
+            } catch (e) {}
+        };
+
+        const getLocalData = (key) => {
+            if (typeof window === 'undefined') return null;
+            let value = null;
+            try { value = localStorage.getItem(key); } catch(e) {}
+            if (!value) {
+                try {
+                    const match = document.cookie.match(new RegExp('(^| )' + key + '=([^;]+)'));
+                    if (match) value = decodeURIComponent(match[2]);
+                } catch(e) {}
+            }
+            return value;
+        };
+
+        const removeLocalData = (key) => {
+            if (typeof window === 'undefined') return;
+            try { localStorage.removeItem(key); } catch(e) {}
+            try { document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`; } catch(e) {}
+        };
+
+        const ROLE_CONFIG = {
+          '司會': { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: User },
+          '執事輪值': { color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: BookOpen },
+          '接待': { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Users },
+          '收奉獻': { color: 'bg-green-100 text-green-700 border-green-200', icon: Heart },
+          '主餐': { color: 'bg-red-100 text-red-700 border-red-200', icon: Coffee },
+          'PPT': { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: Monitor },
+          '新朋友關懷': { color: 'bg-pink-100 text-pink-700 border-pink-200', icon: Smile },
+          '預設': { color: 'bg-slate-50 text-slate-400 border-slate-100', icon: Clock }
+        };
+
+        // --- Helper Functions ---
+        const normalizeDateStr = (d) => {
+            if (!d) return '';
+            const str = String(d);
+            const parts = str.includes('-') ? str.split('-') : (str.includes('/') ? str.split('/') : []);
+            if (parts.length >= 3) {
+                const dayPart = parts[2].split('T')[0].split(' ')[0];
+                return `${parseInt(parts[0])}/${parseInt(parts[1])}/${parseInt(dayPart)}`;
+            }
+            return str;
+        };
+
+        const parseDateObj = (dStr) => {
+            const norm = normalizeDateStr(dStr);
+            if (!norm) return new Date(9999, 11, 31);
+            const parts = norm.split('/');
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        };
+
+        const getSeasonLabels = () => {
+            const now = new Date();
+            const month = now.getMonth() + 1;
+            if (month >= 1 && month <= 3) return { current: '1-3月', next: '4-6月' };
+            if (month >= 4 && month <= 6) return { current: '4-6月', next: '7-9月' };
+            if (month >= 7 && month <= 9) return { current: '7-9月', next: '10-12月' };
+            return { current: '10-12月', next: '1-3月' };
+        };
+
+        const getQuarterStr = (date) => {
+            return `${date.getFullYear()}-Q${Math.ceil((date.getMonth() + 1) / 3)}`;
+        };
+
+        // 新增：強化版姓名解析器 (過濾括號與斜線)
+        const extractNames = (str) => {
+            if (!str) return [];
+            return String(str)
+                .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '') // 移除任何括號內的備註
+                .split(/,|、|，|\/|\s+/) // 支援斜線與多種分隔符
+                .map(n => n.trim())
+                .filter(n => n);
+        };
+
+        // 新增：自動分頁抓取全部資料 (突破 Supabase 1000 筆上限)
+        const fetchAll = async (table, selectStr = '*', orderCol = null, orderAsc = true) => {
+            let allData = [];
+            let from = 0;
+            const limit = 1000;
+            while (true) {
+                let query = supabase.from(table).select(selectStr).range(from, from + limit - 1);
+                if (orderCol) query = query.order(orderCol, { ascending: orderAsc });
+                const { data, error } = await query;
+                if (error || !data || data.length === 0) break;
+                allData = allData.concat(data);
+                if (data.length < limit) break;
+                from += limit;
+            }
+            return allData;
+        };
+
+        // --- App Component ---
+        function App() {
+          const savedUser = getLocalData('tbc_user');
+          
+          const [name, setName] = useState(savedUser || '');
+          const [currentView, setCurrentView] = useState(savedUser ? 'mySchedule' : 'login'); 
+          
+          const [loginError, setLoginError] = useState('');
+          const [swapRequest, setSwapRequest] = useState(null); 
+          const [scheduleData, setScheduleData] = useState([]);
+          const [peopleData, setPeopleData] = useState([]);
+          const [statsData, setStatsData] = useState({});
+          const [rawData, setRawData] = useState(null); 
+          
+          const [isSyncing, setIsSyncing] = useState(true);
+          const [syncStatus, setSyncStatus] = useState('');
+          const [progress, setProgress] = useState(0);
+          
+          const [seasonType, setSeasonType] = useState(ENABLE_PRE_SCHEDULE ? 'next' : 'view'); 
+          const seasonLabels = useMemo(() => getSeasonLabels(), []);
+
+          useEffect(() => {
+            const loadAllData = async () => {
+              setIsSyncing(true);
+              setProgress(10);
+
+              try {
+                // 1. 使用 fetchAll 確保完全突破資料庫隱藏的筆數限制
+                const [membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData] = await Promise.all([
+                    fetchAll('members', '*'),
+                    fetchAll('positions', '*'),
+                    fetchAll('member_positions', '*'),
+                    fetchAll('schedules', '*, members(name), positions(name)', 'service_date', false), // 優先取得最新預排
+                    fetchAll('member_quarter_settings', '*')
+                ]);
+
+                setProgress(50);
+                setRawData({ membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData });
+              } catch (err) {
+                console.error("Supabase 同步失敗", err);
+                setSyncStatus('連線發生錯誤');
+                setTimeout(() => setIsSyncing(false), 500);
+              }
+            };
+            loadAllData();
+          }, []); 
+
+          // 2. 切換季別時處理資料
+          useEffect(() => {
+              if (!rawData) return;
+              const { membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData } = rawData;
+
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const targetQStr = seasonType === 'view' 
+                  ? getQuarterStr(today) 
+                  : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
+
+              const transformedPeople = membersData
+                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB') 
+                  .map(m => {
+                      const pRoles = {};
+                      
+                      // 核心修正：加回「季別覆蓋邏輯 (posMap)」。本季暫停的設定會精準覆蓋掉全域開啟的設定
+                      const posMap = new Map();
+                      const allMyPos = memberPositionsData.filter(mp => String(mp.member_id) === String(m.id));
+                      
+                      allMyPos.forEach(mp => {
+                          if (!mp.quarter || mp.quarter === targetQStr) {
+                              const existing = posMap.get(mp.position_id);
+                              // 若尚未加入，或這筆是針對目標季別的 (權重最高，覆蓋全域)，則寫入
+                              if (!existing || mp.quarter === targetQStr) {
+                                  posMap.set(mp.position_id, mp);
+                              }
+                          }
+                      });
+                      
+                      posMap.forEach((mp, posId) => {
+                          const isActive = mp.is_active !== false && mp.is_active !== 0 && String(mp.is_active).toLowerCase() !== 'false';
+                          if (isActive) {
+                              const pos = positionsData.find(p => String(p.id) === String(posId));
+                              if (pos) pRoles[pos.name.trim()] = "O";
+                          }
+                      });
+
+                      const qs = (quarterSettingsData || []).find(s => s.member_id === m.id && s.quarter === targetQStr);
+
+                      let unavail = '';
+                      if (qs?.unavailable_dates) {
+                          try { unavail = typeof qs.unavailable_dates === 'string' ? JSON.parse(qs.unavailable_dates).join(',') : qs.unavailable_dates.join(','); } catch(e) { unavail = qs.unavailable_dates; }
+                      } else if (m.unavailable_dates) {
+                          try { unavail = typeof m.unavailable_dates === 'string' ? JSON.parse(m.unavailable_dates).join(',') : m.unavailable_dates.join(','); } catch(e) { unavail = m.unavailable_dates; }
+                      }
+
+                      return {
+                          id: m.id,
+                          name: m.name,
+                          session: qs?.preferred_session || m.preferred_session || '皆可',
+                          unavailable: unavail,
+                          willingness: qs?.availability_status || m.availability_status || '可排班',
+                          groupId: m.group_id || '',
+                          session2: parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10) === 1 ? '二堂同崗' : (parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10) === 2 ? '二堂異崗' : ''),
+                          roles: pRoles,
+                          rawDualPref: parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10),
+                          // 新增：提取 newcomer_rule，優先使用季別設定
+                          newcomerRule: qs?.newcomer_rule ?? m.newcomer_rule ?? null 
+                      };
+                  });
+              setPeopleData(transformedPeople);
+              setProgress(70);
+
+              const groupedSchedules = {};
+              const currentStats = {};
+
+              schedulesData.forEach(s => {
+                  const date = s.service_date;
+                  const session = s.session;
+                  const key = `${date}|${session}`;
+                  
+                  if (!groupedSchedules[key]) {
+                      groupedSchedules[key] = { '日期': date, '堂別': session };
+                  }
+                  
+                  const posName = s.positions?.name?.trim();
+                  const memberName = s.members?.name;
+                  
+                  if (posName && memberName) {
+                      if (groupedSchedules[key][posName]) {
+                          groupedSchedules[key][posName] += `、${memberName}`;
+                      } else {
+                          groupedSchedules[key][posName] = memberName;
+                      }
+                      currentStats[memberName] = (currentStats[memberName] || 0) + 1;
+                  }
+              });
+              
+              setScheduleData(Object.values(groupedSchedules));
+              setStatsData(currentStats);
+              
+              setProgress(100);
+              setSyncStatus('同步成功');
+              setTimeout(() => setIsSyncing(false), 500);
+          }, [rawData, seasonType]); 
+
+          useEffect(() => {
+            if (!savedUser && currentView === 'login') {
+                const retrySavedUser = getLocalData('tbc_user');
+                if (retrySavedUser) {
+                    setName(retrySavedUser);
+                    setCurrentView('mySchedule');
+                }
+            }
+          }, []);
+          
+          const handleLogin = (e) => {
+            e.preventDefault();
+            const trimmedName = name.trim();
+            if (!trimmedName) return setLoginError('請輸入完整姓名');
+            
+            const userExists = peopleData.some(p => p.name === trimmedName);
+            if (userExists || peopleData.length === 0) {
+                setLocalData('tbc_user', trimmedName);
+                setCurrentView('mySchedule');
+                setLoginError('');
+            } else {
+                setLoginError('輸入完整姓名');
+            }
+          };
+
+          const handleLogout = () => {
+            removeLocalData('tbc_user');
+            setName('');
+            setLoginError('');
+            setSwapRequest(null);
+            setCurrentView('login');
+          };
+
+          const renderView = () => {
+            switch (currentView) {
+              case 'login': return <LoginView name={name} setName={setName} onLogin={handleLogin} loginError={loginError} isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} />;
+              case 'mySchedule': return <MyScheduleView name={name} scheduleData={scheduleData} peopleData={peopleData} onLogout={handleLogout} onRequestSwap={(req) => { setSwapRequest(req); setCurrentView('swapSearch'); }} seasonType={seasonType} setSeasonType={setSeasonType} isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} />;
+              case 'swapSearch': return <SwapSearchView name={name} scheduleData={scheduleData} peopleData={peopleData} statsData={statsData} onBack={() => setCurrentView('mySchedule')} onLogout={handleLogout} initialRequest={swapRequest} seasonType={seasonType} seasonLabels={seasonLabels} />;
+              default: return <LoginView name={name} setName={setName} onLogin={handleLogin} />;
+            }
+          };
+
+          return <div className="min-h-screen bg-slate-50 font-sans text-slate-900">{renderView()}</div>;
+        }
+
+        // --- Admin Tools Component ---
+        function AdminModal({ isOpen, onClose }) {
+            if (!isOpen) return null;
+
+            const baseUrl = window.location.href.split('?')[0];
+            
+            const generateQuarterlyLink = () => {
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+                
+                const quarters = [2, 5, 8, 11];
+                let targetMonth = quarters.find(m => m >= currentMonth);
+                let targetYear = currentYear;
+
+                if (targetMonth === undefined) {
+                    targetMonth = 2;
+                    targetYear++;
+                }
+
+                const expirationDate = new Date(targetYear, targetMonth + 1, 0);
+                expirationDate.setHours(23, 59, 59, 999);
+                const timestamp = expirationDate.getTime();
+                
+                const payload = JSON.stringify({ exp: timestamp });
+                const token = btoa(payload);
+                
+                return {
+                    url: `${baseUrl}?auth=${token}`,
+                    dateStr: `${expirationDate.getFullYear()}/${expirationDate.getMonth() + 1}/${expirationDate.getDate()}`
+                };
+            };
+
+            const copyToClipboard = () => {
+                const { url, dateStr } = generateQuarterlyLink();
+                navigator.clipboard.writeText(url).then(() => alert(`連結已複製！\n此連結將於 [${dateStr}] 自動失效。`));
+            };
+            
+            const { dateStr: displayDate } = generateQuarterlyLink();
+
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                            <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                                <Lock size={20} className="text-indigo-600"/> 管理員連結產生器
+                            </h3>
+                            <button onClick={onClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><X size={20}/></button>
+                        </div>
+                        
+                        <div className="space-y-3">
+                            <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="font-bold text-emerald-700 flex items-center gap-2"><Timer size={16}/> 限時開啟</span>
+                                    <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full">預排使用</span>
+                                </div>
+                                <div className="text-xs text-emerald-600 mb-3 font-medium bg-white/50 p-2 rounded-lg text-center">
+                                    失效日期：<span className="font-bold">{displayDate}</span>
+                                </div>
+                                <button onClick={copyToClipboard} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
+                                    <LinkIcon size={16}/> 複製預排連結
+                                </button>
+                                <p className="text-[10px] text-emerald-600/60 mt-2 text-center">過期後連結自動變回一般登入頁</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Views ---
+        function LoginView({ name, setName, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels }) {
+          const [logoClicks, setLogoClicks] = useState(0);
+          const [showAdmin, setShowAdmin] = useState(false);
+
+          const handleLogoClick = () => {
+              setLogoClicks(prev => {
+                  const newCount = prev + 1;
+                  if (newCount >= 3) {
+                      setShowAdmin(true);
+                      return 0;
+                  }
+                  return newCount;
+              });
+          };
+
+          return (
+            <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
+              <AdminModal isOpen={showAdmin} onClose={() => setShowAdmin(false)} />
+              
+              <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-10 border border-white">
+                <div className="text-center mb-10">
+                  <div 
+                    onClick={handleLogoClick}
+                    className={`w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-xl rotate-3 transition-colors duration-500 cursor-pointer active:scale-95 ${seasonType === 'view' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-emerald-600 shadow-emerald-200'}`}
+                    title="點擊 3 次開啟管理員選單"
+                  >
+                    <Calendar className="w-12 h-12 text-white" />
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
+                    <div className="mb-1">TBC</div>
+                    <div>主日服事查詢系統</div>
+                  </h2>
+                  
+                 {ENABLE_PRE_SCHEDULE && (
+                    <div className="mt-6 flex justify-center">
+                        <div className="bg-slate-100 p-1.5 rounded-xl inline-flex relative">
+                            <button 
+                                onClick={() => setSeasonType('view')}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all duration-300 flex flex-col items-center justify-center leading-tight ${seasonType === 'view' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                <span>{seasonLabels.current}</span>
+                                <span>服事表</span>
+                            </button>
+                            <button 
+                                onClick={() => setSeasonType('next')}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all duration-300 flex flex-col items-center justify-center leading-tight ${seasonType === 'next' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                <span>{seasonLabels.next}</span>
+                                <span>預排表</span>
+                            </button>
+                        </div>
+                    </div>
+                  )}
+
+                  <p className="text-slate-400 mt-4 font-medium text-sm">
+                    在安息中服事，在服事中成長
+                  </p>
+                </div>
+
+                <form onSubmit={onLogin} className="space-y-4">
+                  <div className="relative">
+                    <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="例如：張小明" required />
+                  </div>
+                  {loginError && <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold"><AlertCircle size={16} /><span>{loginError}</span></div>}
+                  <button type="submit" className={`w-full text-white font-black py-5 rounded-2xl shadow-lg transition-all active:scale-95 text-lg ${seasonType === 'view' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'}`}>
+                      登入
+                  </button>
+                </form>
+              </div>
+            </div>
+          );
+        }
+
+        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels }) {
+          const [flatShifts, setFlatShifts] = useState([]);
+          const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
+          
+          useEffect(() => {
+            const searchName = name.trim();
+            const tempShifts = [];
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // 計算目前該顯示哪一季的資料
+            const targetQStr = seasonType === 'view' 
+                ? getQuarterStr(today) 
+                : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
+
+            scheduleData.forEach(row => {
+              const dateStr = normalizeDateStr(row['日期']);
+              if (!dateStr) return;
+              const dateObj = parseDateObj(row['日期']);
+
+              // 核心修正：直接隱藏已過期的排班
+              if (dateObj < today) return;
+
+              // 過濾掉非目標季別的資料
+              if (getQuarterStr(dateObj) !== targetQStr) return;
+
+              const session = row['堂別'];
+              
+              Object.entries(row).forEach(([key, val]) => {
+                if (['堂別', '日期'].includes(key)) return;
+                const cellValue = String(val || '');
+                
+                // 加入斜線 (/) 支援，避免排班人員輸入不同符號導致同工查不到班
+                const names = cellValue.split(/,|、|，|\/|\s+/).map(n => n.trim()).filter(n => n);
+                
+                if (names.includes(searchName)) {
+                   let shiftNumber = null;
+                   if (numberedRoles.includes(key)) {
+                       const idx = names.indexOf(searchName);
+                       if (idx !== -1) shiftNumber = idx + 1;
+                   }
+                   // 移除了 isPast 屬性，因為過去的班表已經在上面被 return 擋掉了
+                   tempShifts.push({ date: dateStr, dateObj, role: key, shiftNumber, session, rawSession: session });
+                }
+              });
+            });
+            const shiftsMap = new Map();
+            tempShifts.forEach(shift => {
+               const key = shift.role === '執事輪值' ? `${shift.date}|${shift.role}` : `${shift.date}|${shift.role}|${shift.session}`;
+               if (shiftsMap.has(key)) {
+                   const existing = shiftsMap.get(key);
+                   if (!existing.session.includes(shift.session)) existing.session += `、${shift.session}`;
+               } else {
+                   shiftsMap.set(key, { ...shift });
+               }
+            });
+            setFlatShifts(Array.from(shiftsMap.values()).sort((a, b) => a.dateObj - b.dateObj));
+          }, [name, scheduleData, seasonType]); 
+
+          // 核心修正：將原本的 window.open 改成純粹產生網址，交給 <a> 標籤的原生行為處理
+          const getGoogleCalendarUrl = (shift) => {
+             const year = shift.dateObj.getFullYear();
+             const month = String(shift.dateObj.getMonth() + 1).padStart(2, '0');
+             const day = String(shift.dateObj.getDate()).padStart(2, '0');
+             const dateStr = `${year}${month}${day}`;
+             
+             let startTime = '090000';
+             let endTime = '103000';
+             
+             const s = shift.session.toUpperCase();
+             if (s.includes('S1') || s.includes('第一堂')) { 
+                 startTime = '090000'; endTime = '103000'; 
+             } else if (s.includes('S2') || s.includes('第二堂')) { 
+                 startTime = '110000'; endTime = '123000'; 
+             } else if (s.includes('S3') || s.includes('第三堂')) { 
+                 startTime = '130000'; endTime = '143000'; 
+             }
+             
+             const start = `${dateStr}T${startTime}`;
+             const end = `${dateStr}T${endTime}`;
+             
+             const title = encodeURIComponent(`${shift.role}`);
+             const details = encodeURIComponent(`台中浸信會主日服事: ${shift.role}\n堂數: ${shift.session}`);
+             
+             return `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${start}/${end}&details=${details}&ctz=Asia/Taipei`;
+          };
+
+          return (
+            <div className="min-h-screen bg-slate-50 flex flex-col">
+              <nav className="bg-white sticky top-0 z-50 border-b border-slate-100 px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl text-white ${seasonType === 'view' ? 'bg-indigo-600' : 'bg-emerald-600'}`}>
+                    <User size={20} />
+                  </div>
+                  <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">System User</p>
+                          {ENABLE_PRE_SCHEDULE && (
+                              <button 
+                                onClick={() => setSeasonType(seasonType === 'view' ? 'next' : 'view')}
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold border transition-colors flex items-center gap-1 ${
+                                    seasonType === 'view' 
+                                    ? 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100' 
+                                    : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100'
+                                }`}
+                              >
+                                <RefreshCw size={8} />
+                                切換查詢
+                              </button>
+                          )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <h2 className="text-lg font-black text-slate-800">{name}</h2>
+                      </div>
+                  </div>
+                </div>
+                <button onClick={onLogout} className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-xl text-slate-500 font-bold hover:text-red-500 hover:bg-red-50 transition-colors">
+                    <LogOut size={18}/>
+                    <span className="hidden sm:inline">登出</span>
+                </button>
+              </nav>
+
+              <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                        <Calendar className={seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'} size={20} />
+                        <h3 className="text-lg sm:text-xl font-bold text-slate-800">
+                            {seasonType === 'view' ? `${seasonLabels.current} 服事班表` : `${seasonLabels.next} 預排班表`}
+                        </h3>
+                    </div>
+                </div>
+
+                {isSyncing ? (
+                  <div className="flex flex-col items-center justify-center py-20 animate-in fade-in">
+                    <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 w-full max-w-sm text-center">
+                        <div className="mb-4 relative mx-auto w-16 h-16">
+                             <svg className={`animate-spin w-full h-full ${seasonType === 'view' ? 'text-indigo-100' : 'text-emerald-100'}`} viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                             </svg>
+                             <div className={`absolute inset-0 flex items-center justify-center text-xs font-black ${seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'}`}>{progress}%</div>
+                        </div>
+                        <h3 className="text-lg font-black text-slate-800 mb-6">資料載入中</h3>
+                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                            <div className={`h-full rounded-full transition-all duration-300 ease-out ${seasonType === 'view' ? 'bg-indigo-500' : 'bg-emerald-500'}`} style={{ width: `${progress}%` }}></div>
+                        </div>
+                    </div>
+                  </div>
+                ) : (
+                  flatShifts.length > 0 ? (
+                    flatShifts.map((shift, index) => {
+                      const rConfig = ROLE_CONFIG[shift.role] || ROLE_CONFIG['預設'];
+                      const textColorClass = rConfig.color.split(' ')[1] || 'text-slate-800';
+                      return (
+                        <div key={index} className="bg-white rounded-[1.5rem] p-5 shadow-sm border border-slate-200 flex items-center justify-between gap-4 animate-in fade-in transition-transform hover:scale-[1.01]" style={{animationDelay: `${index * 50}ms`}}>
+                          <div className="flex flex-col gap-1 flex-grow">
+                             <span className={`text-xl font-black tracking-tight leading-tight ${textColorClass} flex items-center gap-2`}>
+                               {shift.role}
+                               {shift.shiftNumber && <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-current text-xs font-bold shrink-0">{shift.shiftNumber}</span>}
+                             </span>
+                             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
+                                <div className="flex items-center gap-1.5"><Calendar size={14} className="text-slate-400"/><span>{shift.date}</span></div>
+                                <span className="text-slate-300">|</span><span className="bg-slate-100 px-2 py-0.5 rounded text-xs">{shift.session}</span>
+                             </div>
+                          </div>
+                          
+                          <div className="flex flex-col gap-2">
+                              {seasonType === 'view' && (
+                                <a 
+                                    href={getGoogleCalendarUrl(shift)} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
+                                >
+                                    加入行事曆
+                                </a>
+                              )}
+                              <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
+                                換班查詢
+                              </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
+                      <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Briefcase size={40} /></div>
+                      <p className="text-slate-400 font-bold text-lg">查無資料</p>
+                      <p className="text-sm text-slate-300 mt-1">
+                          {seasonType === 'view' ? `${seasonLabels.current} 沒有排班，好好休息` : `${seasonLabels.next} 沒有排班，好好休息`}
+                      </p>
+                    </div>
+                  )
+                )}
+              </main>
+            </div>
+          );
+        }
+
+        function SwapSearchView({ name, scheduleData, peopleData, statsData, onBack, onLogout, initialRequest, seasonType, seasonLabels }) {
+          const [selectedDate, setSelectedDate] = useState(initialRequest?.date || '');
+          const [selectedRole, setSelectedRole] = useState(initialRequest?.role || '');
+          const [selectedSession, setSelectedSession] = useState(initialRequest?.session || '');
+          const [targetOwner, setTargetOwner] = useState(initialRequest?.owner || name);
+          const [candidates, setCandidates] = useState(null);
+
+          const isSecondSunday = (dateObj) => {
+              if (dateObj.getDay() !== 0) return false;
+              const date = dateObj.getDate();
+              return date >= 8 && date <= 14;
+          };
+
+          useEffect(() => {
+            if (!initialRequest) return;
+            const targetDateNorm = normalizeDateStr(initialRequest.date);
+            const targetDateObj = parseDateObj(initialRequest.date);
+            const schedulesOnDate = scheduleData.filter(s => normalizeDateStr(s['日期']) === targetDateNorm);
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const targetQStr = seasonType === 'view' 
+                ? getQuarterStr(today) 
+                : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
+
+            const seasonStats = {};
+            scheduleData.forEach(row => {
+                const rDateObj = parseDateObj(row['日期']);
+                if (getQuarterStr(rDateObj) === targetQStr) {
+                    Object.entries(row).forEach(([k, v]) => {
+                        if (['日期', '堂別'].includes(k)) return;
+                        if (v && typeof v === 'string') {
+                            const names = extractNames(v);
+                            names.forEach(n => {
+                                seasonStats[n] = (seasonStats[n] || 0) + 1;
+                            });
+                        }
+                    });
+                }
+            });
+
+            // 取得原排班者 (Requester) 的資料與班表
+            const requester = peopleData.find(p => p.name === targetOwner);
+            const requesterShifts = [];
+            scheduleData.forEach(row => {
+                const rDate = normalizeDateStr(row['日期']);
+                const rSession = row['堂別'];
+                Object.entries(row).forEach(([k, v]) => {
+                    if (['日期', '堂別'].includes(k)) return;
+                    if (v && typeof v === 'string') {
+                        if (extractNames(v).includes(targetOwner)) {
+                            requesterShifts.push({ date: rDate, session: rSession, role: k });
+                        }
+                    }
+                });
+            });
+
+            let potential = [];
+            const compatibleRoles = ['接待', '收奉獻', '主餐', '新朋友關懷'];
+
+            peopleData.forEach(person => {
+              // 1. 不能推薦原排班者自己
+              if (person.name === targetOwner) return;
+              
+              // 2. 必須具備該崗位資格
+              const reqRole = (initialRequest.role || '').trim();
+              if (!person.roles[reqRole]) return;
+
+              // 3. 服事意願檢查
+              const status = (person.willingness || '').trim();
+              if (status === '暫停服事' || status === '安息季') return;
+
+              // 4. 排除當天請假的同工
+              const unavailDates = person.unavailable ? person.unavailable.split(',').map(d => normalizeDateStr(d.trim())) : [];
+              if (unavailDates.includes(targetDateNorm)) return;
+
+              // 5. 新朋友關懷規則 (第二週禁排)
+              if ((person.newcomerRule === 2 || person.newcomerRule === 3) && isSecondSunday(targetDateObj)) {
+                  return;
+              }
+
+              // 取得候選人當天已經被排的所有班次
+              const mShiftsToday = [];
+              schedulesOnDate.forEach(s => {
+                 Object.entries(s).forEach(([k, v]) => {
+                     if (['日期', '堂別'].includes(k)) return;
+                     if (v && typeof v === 'string') {
+                         if (extractNames(v).includes(person.name)) {
+                             mShiftsToday.push({ role: k, session: s['堂別'] });
+                         }
+                     }
+                 });
+              });
+
+              const reqSession = String(initialRequest.session || '').trim();
+              const activeRole = reqRole;
+              
+              // 6. 推薦資格邏輯【完全 1:1 對齊 TBC Serve Manager】
+              if (activeRole === '執事輪值') {
+                  if (mShiftsToday.some(d => d.role === '執事輪值')) return;
+              } else {
+                  const shiftsThisSession = mShiftsToday.filter(d => d.session === reqSession);
+                  if (shiftsThisSession.length > 0) {
+                      const allExistingAreConcurrent = shiftsThisSession.every(d => compatibleRoles.includes(d.role));
+                      const isActiveConcurrent = compatibleRoles.includes(activeRole);
+                      if (!allExistingAreConcurrent || !isActiveConcurrent) return;
+                      if (shiftsThisSession.some(d => d.role === activeRole)) return;
+                  }
+                  
+                  const shiftsOtherSession = mShiftsToday.filter(d => d.session !== reqSession);
+                  const dualPref = person.rawDualPref || 0; 
+                  
+                  if (shiftsOtherSession.length > 0) {
+                      if (dualPref === 0) return; 
+                      const otherRoles = shiftsOtherSession.map(d => d.role);
+                      if (dualPref === 1 && !otherRoles.includes(activeRole)) return; 
+                      if (dualPref === 2 && otherRoles.includes(activeRole)) return;  
+                  } else {
+                      if (dualPref === 0 && person.session && person.session !== '皆可') {
+                          if (!person.session.includes(reqSession.replace('堂', ''))) return;
+                      }
+                  }
+              }
+
+              // 7. 計算雙方可互換的班次 (swapOptions)
+              const swapOptions = [];
+              const processedDeaconDates = new Set();
+              
+              const candidateShifts = [];
+              scheduleData.forEach(row => {
+                  const rDate = normalizeDateStr(row['日期']);
+                  const rSession = row['堂別'];
+                  const rDateObj = parseDateObj(row['日期']);
+                  
+                  // 移除 rDate === targetDateNorm 的限制，允許同日跨堂換班 (對齊 Admin 引擎)
+                  if (rDateObj < today || getQuarterStr(rDateObj) !== targetQStr) return;
+
+                  Object.entries(row).forEach(([k, v]) => {
+                      if (['日期', '堂別'].includes(k)) return;
+                      if (v && typeof v === 'string') {
+                          if (extractNames(v).includes(person.name)) {
+                              candidateShifts.push({ date: rDate, session: rSession, role: k });
+                          }
+                      }
+                  });
+              });
+
+              candidateShifts.forEach(shift => {
+                  if (!requester || !requester.roles[shift.role]) return;
+                  
+                  if (shift.role === '執事輪值') {
+                      if (processedDeaconDates.has(shift.date)) return;
+                      processedDeaconDates.add(shift.date);
+                      
+                      const requesterRolesToday = requesterShifts.filter(s => s.date === shift.date).map(s => s.role);
+                      if (requesterRolesToday.includes('執事輪值')) return;
+                      
+                      swapOptions.push({ date: shift.date, role: '執事輪值', session: '第一堂、第二堂' });
+                  } else {
+                      const requesterRolesThisSession = requesterShifts.filter(s => s.date === shift.date && s.session === shift.session).map(s => s.role);
+                      if (requesterRolesThisSession.includes(shift.role)) return;
+                      
+                      swapOptions.push({ date: shift.date, role: shift.role, session: shift.session });
+                  }
+              });
+
+              // 將可互換的班次依日期排序
+              swapOptions.sort((a, b) => parseDateObj(a.date) - parseDateObj(b.date));
+
+              potential.push({ ...person, stats: seasonStats[person.name] || 0, swapOptions });
+            });
+
+            // 修正：嚴格按照「本季服事次數 (stats)」由少到多排序
+            potential.sort((a, b) => a.stats - b.stats);
+            
+            setCandidates(potential);
+          }, [initialRequest, scheduleData, peopleData, seasonType]);
+
+          return (
+            <div className="min-h-screen bg-slate-50 flex flex-col">
+              <nav className="bg-white sticky top-0 z-50 border-b border-slate-100 px-6 py-4 flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <button onClick={onBack} className="bg-slate-100 p-2 rounded-xl text-slate-600 hover:bg-slate-200 transition-colors"><ArrowLeft size={20}/></button>
+                  <div>
+                      <h2 className="text-xl font-black text-slate-800">上一頁</h2>
+                  </div>
+                </div>
+                <button onClick={onLogout} className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-xl text-slate-500 font-bold hover:text-red-500 hover:bg-red-50 transition-colors"><LogOut size={18}/><span>登出</span></button>
+              </nav>
+              <main className="flex-grow p-6 space-y-6 max-w-2xl mx-auto w-full">
+                <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
+                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">幫今天的服事找合適人選：</h3>
+                   <div className="flex items-center gap-4">
+                      <div className="bg-indigo-50 p-4 rounded-2xl text-indigo-600"><Calendar size={28} /></div>
+                      <div>
+                          <p className="text-2xl font-black text-slate-800">{normalizeDateStr(selectedDate)}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                             <span className="text-sm font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{selectedRole}</span>
+                             {selectedRole !== '執事輪值' && <span className="text-sm font-bold text-slate-400">• {selectedSession}</span>}
+                          </div>
+                      </div>
+                   </div>
+                </div>
+                {candidates && (
+                  <div className="space-y-4 animate-in fade-in">
+                    <div className="flex items-center justify-between px-2">
+                      <h3 className="font-black text-slate-700 flex items-center gap-2"><UserCheck className="text-emerald-500" /> 推薦人選 ({candidates.length})</h3>
+                      <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">依本季次數排序</span>
+                    </div>
+                    {candidates.length > 0 ? (
+                      candidates.map((person, idx) => (
+                          <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm transition-all hover:shadow-md">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-md ${idx < 3 ? 'bg-emerald-500' : 'bg-slate-300'}`}>{idx + 1}</div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-xl font-black text-slate-800">{person.name}</p>
+                                    
+                                    {/* 狀態標籤 */}
+                                    {person.swapOptions && person.swapOptions.length > 0 ? (
+                                        <div className="flex items-center gap-1 bg-white text-indigo-600 border border-indigo-200 px-2 py-1 rounded-md text-[10px] font-bold shadow-sm">
+                                            <RefreshCw size={10} /> 換班
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1 bg-white text-orange-600 border border-orange-200 px-2 py-1 rounded-md text-[10px] font-bold shadow-sm">
+                                            <HandHeart size={10} /> 替補
+                                        </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs font-bold text-slate-400 mt-1 flex-wrap">
+                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">{person.session}</span>
+                                    <span>•</span>
+                                    <span>本季服事 {person.stats} 次</span>
+                                    
+                                    {person.groupId && person.groupId.includes('FA') && (
+                                        <span className="ml-1 px-1.5 h-5 rounded-[4px] bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold" title="群組: FA">FA</span>
+                                    )}
+                                    {person.groupId && person.groupId.includes('FB') && (
+                                        <span className="ml-1 px-1.5 h-5 rounded-[4px] bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold" title="群組: FB">FB</span>
+                                    )}
+                                    {person.session2 && (
+                                        <span className={`ml-1 px-1.5 h-5 rounded-[4px] text-white flex items-center justify-center text-[10px] font-bold ${person.session2 === '二堂同崗' ? 'bg-indigo-400' : 'bg-purple-400'}`} title={person.session2}>{person.session2}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* 對方可以拿來交換的班表資訊 */}
+                            {person.swapOptions && person.swapOptions.length > 0 ? (
+                              <div className="mt-4 pt-3 border-t border-slate-50">
+                                <p className="text-[10px] font-bold text-slate-400 mb-2 flex items-center gap-1"><RefreshCw size={10} /> 雙方可以互換的班次：</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {person.swapOptions.map((swap, i) => {
+                                      // 將 2026/4/5 轉為 2026-04-05 格式，完美對齊要求
+                                      const parts = swap.date.split('/');
+                                      const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
+                                      return (
+                                        <div key={i} className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center">
+                                          <span className="font-bold">{formattedDate}</span>
+                                          <span className="text-[10px] opacity-70">({swap.role} • {swap.session})</span>
+                                        </div>
+                                      );
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 pt-3 border-t border-slate-50">
+                                <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                                    <Info size={10} /> 無班可換，可請求支援
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                      ))
+                    ) : (
+                      <div className="p-10 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
+                        <UserX className="mx-auto mb-4 opacity-30" size={48} />
+                        <p className="font-bold">找不到合適人選</p>
+                        <p className="text-[10px] mt-2">同工可能已請假、暫停服事，或不符合兼任條件</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </main>
+            </div>
+          );
+        }
+
+        const container = document.getElementById('root');
+        const root = createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
