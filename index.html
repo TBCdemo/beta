@@ -929,7 +929,7 @@
                   <div className="space-y-4 animate-in fade-in">
                     <div className="flex items-center justify-between px-2">
                       <h3 className="font-black text-slate-700 flex items-center gap-2"><UserCheck className="text-emerald-500" /> 推薦人選 ({candidates.length})</h3>
-                      <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">依本季次數排序</span>
+                      <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">依本季服事次數排序</span>
                     </div>
                     {candidates.length > 0 ? (
                       candidates.map((person, idx) => (
@@ -953,8 +953,6 @@
                                   </div>
                                   <div className="flex items-center gap-1 text-xs font-bold text-slate-400 mt-1 flex-wrap">
                                     <span className="bg-slate-100 px-1.5 py-0.5 rounded">{person.session}</span>
-                                    <span>•</span>
-                                    <span>本季服事 {person.stats} 次</span>
                                     
                                     {person.groupId && person.groupId.includes('FA') && (
                                         <span className="ml-1 px-1.5 h-5 rounded-[4px] bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold" title="群組: FA">FA</span>
