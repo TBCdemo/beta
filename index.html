@@ -207,14 +207,42 @@
               setProgress(10);
 
               try {
-                // 1. 使用 fetchAll 確保完全突破資料庫隱藏的筆數限制
-                const [membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData] = await Promise.all([
+                // 1. 使用 fetchAll 取得基礎設定檔 (排除已刪除的 schedules 表)
+                const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                     fetchAll('members', '*'),
                     fetchAll('positions', '*'),
                     fetchAll('member_positions', '*'),
-                    fetchAll('schedules', '*, members(name), positions(name)', 'service_date', false), // 優先取得最新預排
                     fetchAll('member_quarter_settings', '*')
                 ]);
+
+                // 2. 轉換新架構的排班資料：從 SYSTEM_SCHEDULE_ARCHIVE 解壓縮
+                let schedulesData = [];
+                const archiveMem = membersData.find(m => m.name === 'SYSTEM_SCHEDULE_ARCHIVE');
+                
+                if (archiveMem) {
+                    const archiveQs = quarterSettingsData.filter(q => q.member_id === archiveMem.id);
+                    archiveQs.forEach(qs => {
+                        let shifts = [];
+                        if (qs.unavailable_dates) {
+                            try {
+                                shifts = typeof qs.unavailable_dates === 'string' 
+                                    ? JSON.parse(qs.unavailable_dates) 
+                                    : qs.unavailable_dates;
+                            } catch(e) {}
+                        }
+                        
+                        // 將壓縮的 JSON 陣列還原成舊版 UI 認識的物件結構
+                        shifts.forEach(shift => {
+                            const member = membersData.find(m => m.id === shift.m);
+                            schedulesData.push({
+                                service_date: shift.d,
+                                session: shift.s,
+                                positions: { name: shift.p },
+                                members: { name: member ? member.name : '未知' }
+                            });
+                        });
+                    });
+                }
 
                 setProgress(50);
                 setRawData({ membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData });
@@ -227,7 +255,7 @@
             loadAllData();
           }, []); 
 
-          // 2. 切換季別時處理資料
+          // 切換季別時處理資料
           useEffect(() => {
               if (!rawData) return;
               const { membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData } = rawData;
@@ -239,18 +267,17 @@
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
 
               const transformedPeople = membersData
-                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB') 
+                  // 隱藏系統虛擬帳號
+                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB' && m.name !== 'SYSTEM_SCHEDULE_ARCHIVE') 
                   .map(m => {
                       const pRoles = {};
                       
-                      // 核心修正：加回「季別覆蓋邏輯 (posMap)」。本季暫停的設定會精準覆蓋掉全域開啟的設定
                       const posMap = new Map();
                       const allMyPos = memberPositionsData.filter(mp => String(mp.member_id) === String(m.id));
                       
                       allMyPos.forEach(mp => {
                           if (!mp.quarter || mp.quarter === targetQStr) {
                               const existing = posMap.get(mp.position_id);
-                              // 若尚未加入，或這筆是針對目標季別的 (權重最高，覆蓋全域)，則寫入
                               if (!existing || mp.quarter === targetQStr) {
                                   posMap.set(mp.position_id, mp);
                               }
@@ -284,7 +311,6 @@
                           session2: parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10) === 1 ? '二堂同崗' : (parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10) === 2 ? '二堂異崗' : ''),
                           roles: pRoles,
                           rawDualPref: parseInt(qs?.dual_service_pref ?? m.dual_service_pref ?? 0, 10),
-                          // 新增：提取 newcomer_rule，優先使用季別設定
                           newcomerRule: qs?.newcomer_rule ?? m.newcomer_rule ?? null 
                       };
                   });
@@ -294,6 +320,7 @@
               const groupedSchedules = {};
               const currentStats = {};
 
+              // 使用重建後的 schedulesData
               schedulesData.forEach(s => {
                   const date = s.service_date;
                   const session = s.session;
@@ -535,10 +562,7 @@
               if (!dateStr) return;
               const dateObj = parseDateObj(row['日期']);
 
-              // 核心修正：直接隱藏已過期的排班
               if (dateObj < today) return;
-
-              // 過濾掉非目標季別的資料
               if (getQuarterStr(dateObj) !== targetQStr) return;
 
               const session = row['堂別'];
@@ -547,7 +571,6 @@
                 if (['堂別', '日期'].includes(key)) return;
                 const cellValue = String(val || '');
                 
-                // 加入斜線 (/) 支援，避免排班人員輸入不同符號導致同工查不到班
                 const names = cellValue.split(/,|、|，|\/|\s+/).map(n => n.trim()).filter(n => n);
                 
                 if (names.includes(searchName)) {
@@ -556,7 +579,6 @@
                        const idx = names.indexOf(searchName);
                        if (idx !== -1) shiftNumber = idx + 1;
                    }
-                   // 移除了 isPast 屬性，因為過去的班表已經在上面被 return 擋掉了
                    tempShifts.push({ date: dateStr, dateObj, role: key, shiftNumber, session, rawSession: session });
                 }
               });
@@ -574,7 +596,6 @@
             setFlatShifts(Array.from(shiftsMap.values()).sort((a, b) => a.dateObj - b.dateObj));
           }, [name, scheduleData, seasonType]); 
 
-          // 核心修正：將原本的 window.open 改成純粹產生網址，交給 <a> 標籤的原生行為處理
           const getGoogleCalendarUrl = (shift) => {
              const year = shift.dateObj.getFullYear();
              const month = String(shift.dateObj.getMonth() + 1).padStart(2, '0');
@@ -756,7 +777,6 @@
                 }
             });
 
-            // 取得原排班者 (Requester) 的資料與班表
             const requester = peopleData.find(p => p.name === targetOwner);
             const requesterShifts = [];
             scheduleData.forEach(row => {
@@ -776,27 +796,21 @@
             const compatibleRoles = ['接待', '收奉獻', '主餐', '新朋友關懷'];
 
             peopleData.forEach(person => {
-              // 1. 不能推薦原排班者自己
               if (person.name === targetOwner) return;
               
-              // 2. 必須具備該崗位資格
               const reqRole = (initialRequest.role || '').trim();
               if (!person.roles[reqRole]) return;
 
-              // 3. 服事意願檢查
               const status = (person.willingness || '').trim();
               if (status === '暫停服事' || status === '安息季') return;
 
-              // 4. 排除當天請假的同工
               const unavailDates = person.unavailable ? person.unavailable.split(',').map(d => normalizeDateStr(d.trim())) : [];
               if (unavailDates.includes(targetDateNorm)) return;
 
-              // 5. 新朋友關懷規則 (第二週禁排)
               if ((person.newcomerRule === 2 || person.newcomerRule === 3) && isSecondSunday(targetDateObj)) {
                   return;
               }
 
-              // 取得候選人當天已經被排的所有班次
               const mShiftsToday = [];
               schedulesOnDate.forEach(s => {
                  Object.entries(s).forEach(([k, v]) => {
@@ -812,7 +826,6 @@
               const reqSession = String(initialRequest.session || '').trim();
               const activeRole = reqRole;
               
-              // 6. 推薦資格邏輯【完全 1:1 對齊 TBC Serve Manager】
               if (activeRole === '執事輪值') {
                   if (mShiftsToday.some(d => d.role === '執事輪值')) return;
               } else {
@@ -839,7 +852,6 @@
                   }
               }
 
-              // 7. 計算雙方可互換的班次 (swapOptions)
               const swapOptions = [];
               const processedDeaconDates = new Set();
               
@@ -849,7 +861,6 @@
                   const rSession = row['堂別'];
                   const rDateObj = parseDateObj(row['日期']);
                   
-                  // 移除 rDate === targetDateNorm 的限制，允許同日跨堂換班 (對齊 Admin 引擎)
                   if (rDateObj < today || getQuarterStr(rDateObj) !== targetQStr) return;
 
                   Object.entries(row).forEach(([k, v]) => {
@@ -881,15 +892,11 @@
                   }
               });
 
-              // 將可互換的班次依日期排序
               swapOptions.sort((a, b) => parseDateObj(a.date) - parseDateObj(b.date));
-
               potential.push({ ...person, stats: seasonStats[person.name] || 0, swapOptions });
             });
 
-            // 修正：嚴格按照「本季服事次數 (stats)」由少到多排序
             potential.sort((a, b) => a.stats - b.stats);
-            
             setCandidates(potential);
           }, [initialRequest, scheduleData, peopleData, seasonType]);
 
@@ -934,7 +941,6 @@
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <p className="text-xl font-black text-slate-800">{person.name}</p>
                                     
-                                    {/* 狀態標籤 */}
                                     {person.swapOptions && person.swapOptions.length > 0 ? (
                                         <div className="flex items-center gap-1 bg-white text-indigo-600 border border-indigo-200 px-2 py-1 rounded-md text-[10px] font-bold shadow-sm">
                                             <RefreshCw size={10} /> 換班
@@ -964,13 +970,11 @@
                               </div>
                             </div>
                             
-                            {/* 對方可以拿來交換的班表資訊 */}
                             {person.swapOptions && person.swapOptions.length > 0 ? (
                               <div className="mt-4 pt-3 border-t border-slate-50">
                                 <p className="text-[10px] font-bold text-slate-400 mb-2 flex items-center gap-1"><RefreshCw size={10} /> 雙方可以互換的班次：</p>
                                 <div className="flex flex-wrap gap-2">
                                   {person.swapOptions.map((swap, i) => {
-                                      // 將 2026/4/5 轉為 2026-04-05 格式，完美對齊要求
                                       const parts = swap.date.split('/');
                                       const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
                                       return (
