@@ -976,10 +976,10 @@
                                       const parts = swap.date.split('/');
                                       const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
                                       return (
-                                        <div key={i} className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center">
-                                          <span className="font-bold">{formattedDate}</span>
-                                          <span className="text-[10px] opacity-70">({swap.role} • {swap.session})</span>
-                                        </div>
+                                        <div key={i} className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
+  <span className="font-bold">{formattedDate}</span>
+  <span className="opacity-70">({swap.role} • {swap.session})</span>
+</div>
                                       );
                                   })}
                                 </div>
