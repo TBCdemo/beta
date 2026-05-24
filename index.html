@@ -163,7 +163,7 @@
           const savedUser = getLocalData('tbc_user');
           
           const [name, setName] = useState(savedUser || '');
-          const [password, setPassword] = useState(''); // 管理員密碼狀態
+          const [password, setPassword] = useState(''); 
           const [currentView, setCurrentView] = useState(savedUser ? 'mySchedule' : 'login'); 
           
           const [loginError, setLoginError] = useState('');
@@ -177,7 +177,7 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
-          const [isPreScheduleEnabled, setIsPreScheduleEnabled] = useState(false); // 全域預排開關狀態
+          const [isPreScheduleEnabled, setIsPreScheduleEnabled] = useState(false); 
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
 
@@ -353,19 +353,19 @@
           const handleLogin = async (e) => {
             e.preventDefault();
             const trimmedName = name.trim();
-            if (!trimmedName) return setLoginError('輸入完整姓名');
+            if (!trimmedName) return setLoginError('請輸入完整姓名');
             
             // --- 管理員專屬登入邏輯 (Supabase Auth) ---
             if (trimmedName === 'tbcadmin') {
-                if (!password) return setLoginError('輸入密碼');
+                if (!password) return setLoginError('請輸入管理員密碼');
                 
                 const { data, error } = await supabase.auth.signInWithPassword({
-                    email: 'tbcadmin@tbc.gmail.com', // 請確定 Supabase Auth 有建立這個 Email
+                    email: 'tbcadmin@tbc.gmail.com', // 確保 Supabase Auth 有建立這個 Email
                     password: password,
                 });
 
                 if (error) {
-                    return setLoginError('密碼錯誤');
+                    return setLoginError('密碼錯誤或驗證失敗');
                 }
 
                 setLocalData('tbc_user', trimmedName);
@@ -423,7 +423,6 @@
                       if (idx > -1) {
                           updatedMembers[idx].availability_status = targetStatus;
                       } else {
-                          // 若原本不存在就塞進去
                           updatedMembers.push({ name: 'SYSTEM_CONFIG', availability_status: targetStatus });
                       }
                       setRawData({ ...rawData, membersData: updatedMembers });
@@ -659,17 +658,14 @@
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
                 
-                {/* 🛠️ 管理員專屬功能面板 */}
+                {/* 🛠️ 管理員控制面板 */}
                 {name === 'tbcadmin' && (
                   <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
                     <div className="flex items-center justify-between">
                       <div>
                         <h4 className="font-black text-base flex items-center gap-2">
-                          <Lock size={16} className="text-emerald-400" /> 系統管理員主控台
+                          <Lock size={16} className="text-emerald-400" /> 管理員控制面板
                         </h4>
-                        <p className="text-xs text-slate-400 mt-1">
-                          控制全教會同工是否可以觀看與操作「{seasonLabels.next}」的下季預排表。
-                        </p>
                       </div>
                       
                       <button
@@ -680,7 +676,7 @@
                             : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                         }`}
                       >
-                        {isPreScheduleEnabled ? '● 預排作業：開啟中' : '○ 預排作業：已關閉'}
+                        {isPreScheduleEnabled ? '● 開啟預排班表' : '○ 關閉預排班表'}
                       </button>
                     </div>
                   </div>
@@ -730,19 +726,22 @@
                           </div>
                           
                           <div className="flex flex-col gap-2">
+                              {/* 只有在目前服事表 (seasonType === 'view') 時才顯示 加入行事曆 與 換班查詢 */}
                               {seasonType === 'view' && (
-                                <a 
-                                    href={getGoogleCalendarUrl(shift)} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
-                                >
-                                    加入行事曆
-                                </a>
+                                <>
+                                    <a 
+                                        href={getGoogleCalendarUrl(shift)} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
+                                    >
+                                        加入行事曆
+                                    </a>
+                                    <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
+                                      換班查詢
+                                    </button>
+                                </>
                               )}
-                              <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
-                                換班查詢
-                              </button>
                           </div>
                         </div>
                       );
