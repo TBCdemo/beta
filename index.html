@@ -257,9 +257,9 @@
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
 
               const transformedPeople = membersData
-                  // 過濾掉系統專用的虛擬帳號
-                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB' && m.name !== 'SYSTEM_SCHEDULE_ARCHIVE' && m.name !== 'SYSTEM_CONFIG') 
-                  .map(m => {
+    // 過濾掉所有以 SYSTEM_ 開頭的系統虛擬帳號
+    .filter(m => m.name && !m.name.startsWith('SYSTEM_')) 
+    .map(m => {
                       const pRoles = {};
                       
                       const posMap = new Map();
