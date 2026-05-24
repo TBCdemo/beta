@@ -353,19 +353,19 @@
           const handleLogin = async (e) => {
             e.preventDefault();
             const trimmedName = name.trim();
-            if (!trimmedName) return setLoginError('請輸入完整姓名');
+            if (!trimmedName) return setLoginError('輸入完整姓名');
             
             // --- 管理員專屬登入邏輯 (Supabase Auth) ---
             if (trimmedName === 'tbcadmin') {
-                if (!password) return setLoginError('請輸入管理員密碼');
+                if (!password) return setLoginError('輸入密碼');
                 
                 const { data, error } = await supabase.auth.signInWithPassword({
-                    email: 'admin@tbc.local', // 請確定 Supabase Auth 有建立這個 Email
+                    email: 'tbcadmin@tbc.gmail.com', // 請確定 Supabase Auth 有建立這個 Email
                     password: password,
                 });
 
                 if (error) {
-                    return setLoginError('密碼錯誤或驗證失敗');
+                    return setLoginError('密碼錯誤');
                 }
 
                 setLocalData('tbc_user', trimmedName);
