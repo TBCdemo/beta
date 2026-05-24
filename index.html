@@ -8,7 +8,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone@7.22.20/babel.min.js"></script>
 
-    <!-- 加入 Supabase 的函式庫 -->
     <script type="importmap">
     {
         "imports": {
@@ -61,25 +60,6 @@
         const SUPABASE_KEY = "sb_publishable_GwDMLoXcHaTzQDCcQlDuGw_4J9mwiaA";
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         
-        // --- 核心權限判斷邏輯 ---
-        const checkIsOpen = () => {
-            if (typeof window === 'undefined') return false;
-            const params = new URLSearchParams(window.location.search);
-            const auth = params.get('auth');
-            if (auth) {
-                try {
-                    const decoded = atob(auth);
-                    const data = JSON.parse(decoded);
-                    if (data.exp && Date.now() < data.exp) return true;
-                } catch (e) { console.error("無效的金鑰"); }
-            }
-            const mode = params.get('mode');
-            if (mode === 'close') return false; 
-            return false;
-        };
-
-        const ENABLE_PRE_SCHEDULE = checkIsOpen();
-
         // --- 儲存輔助函式 ---
         const setLocalData = (key, value) => {
             if (typeof window === 'undefined') return;
@@ -153,17 +133,15 @@
             return `${date.getFullYear()}-Q${Math.ceil((date.getMonth() + 1) / 3)}`;
         };
 
-        // 新增：強化版姓名解析器 (過濾括號與斜線)
         const extractNames = (str) => {
             if (!str) return [];
             return String(str)
-                .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '') // 移除任何括號內的備註
-                .split(/,|、|，|\/|\s+/) // 支援斜線與多種分隔符
+                .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '') 
+                .split(/,|、|，|\/|\s+/) 
                 .map(n => n.trim())
                 .filter(n => n);
         };
 
-        // 新增：自動分頁抓取全部資料 (突破 Supabase 1000 筆上限)
         const fetchAll = async (table, selectStr = '*', orderCol = null, orderAsc = true) => {
             let allData = [];
             let from = 0;
@@ -185,6 +163,7 @@
           const savedUser = getLocalData('tbc_user');
           
           const [name, setName] = useState(savedUser || '');
+          const [password, setPassword] = useState(''); // 管理員密碼狀態
           const [currentView, setCurrentView] = useState(savedUser ? 'mySchedule' : 'login'); 
           
           const [loginError, setLoginError] = useState('');
@@ -198,7 +177,8 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
-          const [seasonType, setSeasonType] = useState(ENABLE_PRE_SCHEDULE ? 'next' : 'view'); 
+          const [isPreScheduleEnabled, setIsPreScheduleEnabled] = useState(false); // 全域預排開關狀態
+          const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
 
           useEffect(() => {
@@ -207,7 +187,6 @@
               setProgress(10);
 
               try {
-                // 1. 使用 fetchAll 取得基礎設定檔 (排除已刪除的 schedules 表)
                 const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                     fetchAll('members', '*'),
                     fetchAll('positions', '*'),
@@ -215,7 +194,15 @@
                     fetchAll('member_quarter_settings', '*')
                 ]);
 
-                // 2. 轉換新架構的排班資料：從 SYSTEM_SCHEDULE_ARCHIVE 解壓縮
+                // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
+                const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
+                if (configMember) {
+                    setIsPreScheduleEnabled(configMember.availability_status === 'OPEN');
+                } else {
+                    setIsPreScheduleEnabled(false);
+                }
+
+                // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
                 let schedulesData = [];
                 const archiveMem = membersData.find(m => m.name === 'SYSTEM_SCHEDULE_ARCHIVE');
                 
@@ -231,7 +218,6 @@
                             } catch(e) {}
                         }
                         
-                        // 將壓縮的 JSON 陣列還原成舊版 UI 認識的物件結構
                         shifts.forEach(shift => {
                             const member = membersData.find(m => m.id === shift.m);
                             schedulesData.push({
@@ -255,7 +241,11 @@
             loadAllData();
           }, []); 
 
-          // 切換季別時處理資料
+          // 切換預排開關時，同步更新目前顯示的季別
+          useEffect(() => {
+              setSeasonType(isPreScheduleEnabled ? 'next' : 'view');
+          }, [isPreScheduleEnabled]);
+
           useEffect(() => {
               if (!rawData) return;
               const { membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData } = rawData;
@@ -267,8 +257,8 @@
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
 
               const transformedPeople = membersData
-                  // 隱藏系統虛擬帳號
-                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB' && m.name !== 'SYSTEM_SCHEDULE_ARCHIVE') 
+                  // 過濾掉系統專用的虛擬帳號
+                  .filter(m => m.name !== 'SYSTEM_CUSTOM_HOLIDAYS_DB' && m.name !== 'SYSTEM_SCHEDULE_ARCHIVE' && m.name !== 'SYSTEM_CONFIG') 
                   .map(m => {
                       const pRoles = {};
                       
@@ -320,7 +310,6 @@
               const groupedSchedules = {};
               const currentStats = {};
 
-              // 使用重建後的 schedulesData
               schedulesData.forEach(s => {
                   const date = s.service_date;
                   const session = s.session;
@@ -359,13 +348,34 @@
                     setCurrentView('mySchedule');
                 }
             }
-          }, []);
+          }, [savedUser, currentView]);
           
-          const handleLogin = (e) => {
+          const handleLogin = async (e) => {
             e.preventDefault();
             const trimmedName = name.trim();
             if (!trimmedName) return setLoginError('請輸入完整姓名');
             
+            // --- 管理員專屬登入邏輯 (Supabase Auth) ---
+            if (trimmedName === 'tbcadmin') {
+                if (!password) return setLoginError('請輸入管理員密碼');
+                
+                const { data, error } = await supabase.auth.signInWithPassword({
+                    email: 'admin@tbc.local', // 請確定 Supabase Auth 有建立這個 Email
+                    password: password,
+                });
+
+                if (error) {
+                    return setLoginError('密碼錯誤或驗證失敗');
+                }
+
+                setLocalData('tbc_user', trimmedName);
+                setCurrentView('mySchedule');
+                setLoginError('');
+                setPassword('');
+                return;
+            }
+
+            // --- 一般使用者登入邏輯 ---
             const userExists = peopleData.some(p => p.name === trimmedName);
             if (userExists || peopleData.length === 0) {
                 setLocalData('tbc_user', trimmedName);
@@ -376,123 +386,96 @@
             }
           };
 
-          const handleLogout = () => {
+          const handleLogout = async () => {
+            if (name === 'tbcadmin') {
+                await supabase.auth.signOut();
+            }
             removeLocalData('tbc_user');
             setName('');
+            setPassword('');
             setLoginError('');
             setSwapRequest(null);
             setCurrentView('login');
           };
 
+          // 🟢 管理員切換預排開關並寫回虛擬同工
+          const handleTogglePreSchedule = async (newValue) => {
+              setIsSyncing(true);
+              const targetStatus = newValue ? 'OPEN' : 'CLOSED';
+              
+              const configMember = rawData?.membersData?.find(m => m.name === 'SYSTEM_CONFIG');
+
+              let error;
+              if (configMember) {
+                  const res = await supabase.from('members').update({ availability_status: targetStatus }).eq('id', configMember.id);
+                  error = res.error;
+              } else {
+                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_CONFIG', availability_status: targetStatus }]);
+                  error = res.error;
+              }
+              
+              if (!error) {
+                  setIsPreScheduleEnabled(newValue);
+                  setSyncStatus('設定已更新');
+                  if (rawData && rawData.membersData) {
+                      const updatedMembers = [...rawData.membersData];
+                      const idx = updatedMembers.findIndex(m => m.name === 'SYSTEM_CONFIG');
+                      if (idx > -1) {
+                          updatedMembers[idx].availability_status = targetStatus;
+                      } else {
+                          // 若原本不存在就塞進去
+                          updatedMembers.push({ name: 'SYSTEM_CONFIG', availability_status: targetStatus });
+                      }
+                      setRawData({ ...rawData, membersData: updatedMembers });
+                  }
+              } else {
+                  alert('更新失敗，請檢查權限');
+                  console.error(error);
+              }
+              setTimeout(() => setIsSyncing(false), 500);
+          };
+
           const renderView = () => {
             switch (currentView) {
-              case 'login': return <LoginView name={name} setName={setName} onLogin={handleLogin} loginError={loginError} isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} />;
-              case 'mySchedule': return <MyScheduleView name={name} scheduleData={scheduleData} peopleData={peopleData} onLogout={handleLogout} onRequestSwap={(req) => { setSwapRequest(req); setCurrentView('swapSearch'); }} seasonType={seasonType} setSeasonType={setSeasonType} isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} />;
-              case 'swapSearch': return <SwapSearchView name={name} scheduleData={scheduleData} peopleData={peopleData} statsData={statsData} onBack={() => setCurrentView('mySchedule')} onLogout={handleLogout} initialRequest={swapRequest} seasonType={seasonType} seasonLabels={seasonLabels} />;
-              default: return <LoginView name={name} setName={setName} onLogin={handleLogin} />;
+              case 'login': 
+                  return <LoginView 
+                      name={name} setName={setName} 
+                      password={password} setPassword={setPassword} 
+                      onLogin={handleLogin} loginError={loginError} 
+                      isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} 
+                      seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} 
+                      isPreScheduleEnabled={isPreScheduleEnabled} 
+                  />;
+              case 'mySchedule': 
+                  return <MyScheduleView 
+                      name={name} scheduleData={scheduleData} peopleData={peopleData} onLogout={handleLogout} 
+                      onRequestSwap={(req) => { setSwapRequest(req); setCurrentView('swapSearch'); }} 
+                      seasonType={seasonType} setSeasonType={setSeasonType} 
+                      isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} 
+                      isPreScheduleEnabled={isPreScheduleEnabled} onTogglePreSchedule={handleTogglePreSchedule}
+                  />;
+              case 'swapSearch': 
+                  return <SwapSearchView 
+                      name={name} scheduleData={scheduleData} peopleData={peopleData} statsData={statsData} 
+                      onBack={() => setCurrentView('mySchedule')} onLogout={handleLogout} 
+                      initialRequest={swapRequest} seasonType={seasonType} seasonLabels={seasonLabels} 
+                  />;
+              default: return null;
             }
           };
 
           return <div className="min-h-screen bg-slate-50 font-sans text-slate-900">{renderView()}</div>;
         }
 
-        // --- Admin Tools Component ---
-        function AdminModal({ isOpen, onClose }) {
-            if (!isOpen) return null;
-
-            const baseUrl = window.location.href.split('?')[0];
-            
-            const generateQuarterlyLink = () => {
-                const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
-                
-                const quarters = [2, 5, 8, 11];
-                let targetMonth = quarters.find(m => m >= currentMonth);
-                let targetYear = currentYear;
-
-                if (targetMonth === undefined) {
-                    targetMonth = 2;
-                    targetYear++;
-                }
-
-                const expirationDate = new Date(targetYear, targetMonth + 1, 0);
-                expirationDate.setHours(23, 59, 59, 999);
-                const timestamp = expirationDate.getTime();
-                
-                const payload = JSON.stringify({ exp: timestamp });
-                const token = btoa(payload);
-                
-                return {
-                    url: `${baseUrl}?auth=${token}`,
-                    dateStr: `${expirationDate.getFullYear()}/${expirationDate.getMonth() + 1}/${expirationDate.getDate()}`
-                };
-            };
-
-            const copyToClipboard = () => {
-                const { url, dateStr } = generateQuarterlyLink();
-                navigator.clipboard.writeText(url).then(() => alert(`連結已複製！\n此連結將於 [${dateStr}] 自動失效。`));
-            };
-            
-            const { dateStr: displayDate } = generateQuarterlyLink();
-
-            return (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
-                        <div className="flex justify-between items-center border-b border-slate-100 pb-4">
-                            <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                                <Lock size={20} className="text-indigo-600"/> 管理員連結產生器
-                            </h3>
-                            <button onClick={onClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><X size={20}/></button>
-                        </div>
-                        
-                        <div className="space-y-3">
-                            <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="font-bold text-emerald-700 flex items-center gap-2"><Timer size={16}/> 限時開啟</span>
-                                    <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full">預排使用</span>
-                                </div>
-                                <div className="text-xs text-emerald-600 mb-3 font-medium bg-white/50 p-2 rounded-lg text-center">
-                                    失效日期：<span className="font-bold">{displayDate}</span>
-                                </div>
-                                <button onClick={copyToClipboard} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
-                                    <LinkIcon size={16}/> 複製預排連結
-                                </button>
-                                <p className="text-[10px] text-emerald-600/60 mt-2 text-center">過期後連結自動變回一般登入頁</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
         // --- Views ---
-        function LoginView({ name, setName, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels }) {
-          const [logoClicks, setLogoClicks] = useState(0);
-          const [showAdmin, setShowAdmin] = useState(false);
-
-          const handleLogoClick = () => {
-              setLogoClicks(prev => {
-                  const newCount = prev + 1;
-                  if (newCount >= 3) {
-                      setShowAdmin(true);
-                      return 0;
-                  }
-                  return newCount;
-              });
-          };
+        function LoginView({ name, setName, password, setPassword, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, isPreScheduleEnabled }) {
+          const isAdmin = name.trim() === 'tbcadmin';
 
           return (
             <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
-              <AdminModal isOpen={showAdmin} onClose={() => setShowAdmin(false)} />
-              
               <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-10 border border-white">
                 <div className="text-center mb-10">
-                  <div 
-                    onClick={handleLogoClick}
-                    className={`w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-xl rotate-3 transition-colors duration-500 cursor-pointer active:scale-95 ${seasonType === 'view' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-emerald-600 shadow-emerald-200'}`}
-                    title="點擊 3 次開啟管理員選單"
-                  >
+                  <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-xl rotate-3 transition-colors duration-500 cursor-default ${seasonType === 'view' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-emerald-600 shadow-emerald-200'}`}>
                     <Calendar className="w-12 h-12 text-white" />
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
@@ -500,11 +483,12 @@
                     <div>主日服事查詢系統</div>
                   </h2>
                   
-                 {ENABLE_PRE_SCHEDULE && (
-                    <div className="mt-6 flex justify-center">
+                 {isPreScheduleEnabled && (
+                    <div className="mt-6 flex justify-center animate-in fade-in">
                         <div className="bg-slate-100 p-1.5 rounded-xl inline-flex relative">
                             <button 
                                 onClick={() => setSeasonType('view')}
+                                type="button"
                                 className={`px-4 py-2 rounded-lg text-sm font-bold transition-all duration-300 flex flex-col items-center justify-center leading-tight ${seasonType === 'view' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                                 <span>{seasonLabels.current}</span>
@@ -512,6 +496,7 @@
                             </button>
                             <button 
                                 onClick={() => setSeasonType('next')}
+                                type="button"
                                 className={`px-4 py-2 rounded-lg text-sm font-bold transition-all duration-300 flex flex-col items-center justify-center leading-tight ${seasonType === 'next' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                                 <span>{seasonLabels.next}</span>
@@ -531,6 +516,21 @@
                     <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
                     <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="例如：張小明" required />
                   </div>
+                  
+                  {isAdmin && (
+                    <div className="relative animate-in">
+                        <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
+                        <input 
+                            type="password" 
+                            value={password} 
+                            onChange={(e) => setPassword(e.target.value)} 
+                            className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" 
+                            placeholder="請輸入管理員密碼" 
+                            required 
+                        />
+                    </div>
+                  )}
+
                   {loginError && <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold"><AlertCircle size={16} /><span>{loginError}</span></div>}
                   <button type="submit" className={`w-full text-white font-black py-5 rounded-2xl shadow-lg transition-all active:scale-95 text-lg ${seasonType === 'view' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'}`}>
                       登入
@@ -541,7 +541,7 @@
           );
         }
 
-        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels }) {
+        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, isPreScheduleEnabled, onTogglePreSchedule }) {
           const [flatShifts, setFlatShifts] = useState([]);
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           
@@ -552,7 +552,6 @@
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            // 計算目前該顯示哪一季的資料
             const targetQStr = seasonType === 'view' 
                 ? getQuarterStr(today) 
                 : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
@@ -633,7 +632,7 @@
                   <div className="flex flex-col">
                       <div className="flex items-center gap-2">
                           <p className="text-[10px] text-slate-400 font-bold uppercase">System User</p>
-                          {ENABLE_PRE_SCHEDULE && (
+                          {isPreScheduleEnabled && (
                               <button 
                                 onClick={() => setSeasonType(seasonType === 'view' ? 'next' : 'view')}
                                 className={`text-[10px] px-2 py-0.5 rounded-full font-bold border transition-colors flex items-center gap-1 ${
@@ -659,6 +658,34 @@
               </nav>
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
+                
+                {/* 🛠️ 管理員專屬功能面板 */}
+                {name === 'tbcadmin' && (
+                  <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-black text-base flex items-center gap-2">
+                          <Lock size={16} className="text-emerald-400" /> 系統管理員主控台
+                        </h4>
+                        <p className="text-xs text-slate-400 mt-1">
+                          控制全教會同工是否可以觀看與操作「{seasonLabels.next}」的下季預排表。
+                        </p>
+                      </div>
+                      
+                      <button
+                        onClick={() => onTogglePreSchedule(!isPreScheduleEnabled)}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all shadow-md active:scale-95 whitespace-nowrap ml-4 ${
+                          isPreScheduleEnabled 
+                            ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-900/30' 
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {isPreScheduleEnabled ? '● 預排作業：開啟中' : '○ 預排作業：已關閉'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                         <Calendar className={seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'} size={20} />
@@ -977,9 +1004,9 @@
                                       const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
                                       return (
                                         <div key={i} className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
-  <span className="font-bold">{formattedDate}</span>
-  <span className="opacity-70">({swap.role} • {swap.session})</span>
-</div>
+                                            <span className="font-bold">{formattedDate}</span>
+                                            <span className="opacity-70">({swap.role} • {swap.session})</span>
+                                        </div>
                                       );
                                   })}
                                 </div>
