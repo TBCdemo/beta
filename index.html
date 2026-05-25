@@ -394,7 +394,7 @@
 
             // 🛑 門禁防護：如果系統為 NONE (兩者皆關閉)，非管理員禁止登入
             if (!systemConfig.current && !systemConfig.next) {
-                return setLoginError('系統維護中，班表暫不開放');
+                return setLoginError('系統維護中，暫停使用。');
             }
 
             // --- 一般使用者登入邏輯 ---
@@ -704,10 +704,9 @@
                     <div className="flex flex-col gap-3">
                       <div>
                         <h4 className="font-black text-base flex items-center gap-2 mb-1">
-                          <Lock size={16} className="text-emerald-400" /> 系統開放模式設定
+                          <Lock size={16} className="text-emerald-400" /> 控制面板
                         </h4>
-                        <p className="text-xs text-slate-400">綠色表示前台開放，紅色表示隱藏關閉</p>
-                      </div>
+                        </div>
                       
                       <div className="flex flex-col sm:flex-row gap-3 mt-2">
                         {/* 服事班表獨立開關 */}
@@ -723,7 +722,7 @@
                           <span>服事班表 ({seasonLabels.current})</span>
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${systemConfig.current ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
-                            {systemConfig.current ? '開啟' : '關閉'}
+                            {systemConfig.current ? 'Open' : 'Close'}
                           </div>
                         </button>
 
@@ -740,7 +739,7 @@
                           <span>預排班表 ({seasonLabels.next})</span>
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${systemConfig.next ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
-                            {systemConfig.next ? '開啟' : '關閉'}
+                            {systemConfig.next ? 'Open' : 'Close'}
                           </div>
                         </button>
                       </div>
@@ -820,7 +819,7 @@
                       {/* 🛑 依據開放狀態顯示對應的訊息 */}
                       <p className="text-sm text-slate-300 mt-1">
                           {!isViewAllowed 
-                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，班表暫未開放') 
+                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，暫停使用。') 
                               : '目前季度沒有您的排班，好好休息'}
                       </p>
                     </div>
