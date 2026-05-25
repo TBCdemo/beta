@@ -392,6 +392,11 @@
                 return;
             }
 
+            // 🛑 門禁防護：如果系統為 NONE (兩者皆關閉)，非管理員禁止登入
+            if (!systemConfig.current && !systemConfig.next) {
+                return setLoginError('系統維護中，班表暫不開放');
+            }
+
             // --- 一般使用者登入邏輯 ---
             const userExists = peopleData.some(p => p.name === trimmedName);
             if (userExists || peopleData.length === 0) {
@@ -572,6 +577,12 @@
           const [flatShifts, setFlatShifts] = useState([]);
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           
+          // 🛑 防護判斷：目前所在的頁籤 (seasonType) 是否有對外開放
+          const isViewAllowed = seasonType === 'view' ? systemConfig.current : systemConfig.next;
+          
+          // 🛑 核心過濾：如果該模式未開放，強制將顯示資料設為空陣列
+          const displayShifts = isViewAllowed ? flatShifts : [];
+          
           useEffect(() => {
             const searchName = name.trim();
             const tempShifts = [];
@@ -687,7 +698,7 @@
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
                 
-                {/* 🛠️ 管理員控制面板 (修改為獨立二按鈕紅綠開關) */}
+                {/* 🛠️ 管理員控制面板 (獨立二按鈕紅綠開關) */}
                 {name === 'tbcadmin' && (
                   <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
                     <div className="flex flex-col gap-3">
@@ -763,8 +774,8 @@
                     </div>
                   </div>
                 ) : (
-                  flatShifts.length > 0 ? (
-                    flatShifts.map((shift, index) => {
+                  displayShifts.length > 0 ? (
+                    displayShifts.map((shift, index) => {
                       const rConfig = ROLE_CONFIG[shift.role] || ROLE_CONFIG['預設'];
                       const textColorClass = rConfig.color.split(' ')[1] || 'text-slate-800';
                       return (
@@ -805,8 +816,12 @@
                     <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
                       <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Briefcase size={40} /></div>
                       <p className="text-slate-400 font-bold text-lg">查無資料</p>
+                      
+                      {/* 🛑 依據開放狀態顯示對應的訊息 */}
                       <p className="text-sm text-slate-300 mt-1">
-                          {(!systemConfig.current && !systemConfig.next) ? '系統維護中，班表暫未開放' : '目前季度沒有您的排班，好好休息'}
+                          {!isViewAllowed 
+                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，班表暫未開放') 
+                              : '目前季度沒有您的排班，好好休息'}
                       </p>
                     </div>
                   )
