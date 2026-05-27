@@ -51,8 +51,7 @@
         import { 
           Calendar, User, LogOut, Heart, Monitor, Users, Smile, BookOpen, 
           Coffee, RefreshCw, AlertCircle, ArrowLeft, UserCheck, HandHeart, 
-          Clock, Briefcase, Info, Lock, Unlock, Link as LinkIcon, X, Timer, UserX, CalendarPlus,
-          Sparkles, Zap
+          Clock, Briefcase, Info, Lock, Unlock, Link as LinkIcon, X, Timer, UserX, CalendarPlus
         } from 'lucide-react';
         import { createClient } from '@supabase/supabase-js';
 
@@ -102,46 +101,6 @@
           '預設': { color: 'bg-slate-50 text-slate-400 border-slate-100', icon: Clock }
         };
 
-        // --- 數位徽章計算器 ---
-        const getMemberBadges = (person, statsCount) => {
-            const badges = [];
-            if (!person) return badges;
-            
-            // 1. 忠心良僕：當季服事累積滿 6 次
-            if (statsCount >= 6) {
-                badges.push({
-                    id: 'faithful',
-                    name: '忠心良僕',
-                    icon: HandHeart,
-                    color: 'bg-amber-50 text-amber-600 border-amber-200'
-                });
-            }
-            
-            // 2. 全能大師：同時擁有 3 種以上不同的服事崗位
-            const activeRolesCount = Object.keys(person.roles || {}).length;
-            if (activeRolesCount >= 3) {
-                badges.push({
-                    id: 'all_rounder',
-                    name: '全能大師',
-                    icon: Sparkles,
-                    color: 'bg-purple-50 text-purple-600 border-purple-200'
-                });
-            }
-            
-            // 3. 補位英雄：時間完全彈性，無請假且任何堂次皆可
-            const isFlexible = person.session === '皆可' && !person.unavailable;
-            if (isFlexible) {
-                badges.push({
-                    id: 'hero',
-                    name: '補位英雄',
-                    icon: Zap,
-                    color: 'bg-orange-50 text-orange-600 border-orange-200'
-                });
-            }
-            
-            return badges;
-        };
-
         // --- Helper Functions ---
         const normalizeDateStr = (d) => {
             if (!d) return '';
@@ -166,7 +125,7 @@
             const month = now.getMonth() + 1;
             if (month >= 1 && month <= 3) return { current: '1-3月', next: '4-6月' };
             if (month >= 4 && month <= 6) return { current: '4-6月', next: '7-9月' };
-            if (month >= 7 && month <= 9) return { current: '7-9月', next: '10-12月' };
+            if (month >= 7 && month <= 9) return { current: '4-6月', next: '10-12月' };
             return { current: '10-12月', next: '1-3月' };
         };
 
@@ -218,7 +177,8 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
-          const [isPreScheduleEnabled, setIsPreScheduleEnabled] = useState(false); 
+          // 系統開放狀態控制：預設皆開
+          const [systemConfig, setSystemConfig] = useState({ current: true, next: false }); 
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
 
@@ -238,9 +198,22 @@
                 // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
                 const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
                 if (configMember) {
-                    setIsPreScheduleEnabled(configMember.availability_status === 'OPEN');
+                    const status = configMember.availability_status || 'CURRENT';
+                    const parsedConfig = {
+                        current: status === 'BOTH' || status === 'CURRENT',
+                        next: status === 'BOTH' || status === 'NEXT'
+                    };
+                    setSystemConfig(parsedConfig);
+                    
+                    // 根據目前開關狀態，決定使用者預設先看哪一季
+                    if (parsedConfig.current) {
+                        setSeasonType('view');
+                    } else if (parsedConfig.next) {
+                        setSeasonType('next');
+                    }
                 } else {
-                    setIsPreScheduleEnabled(false);
+                    setSystemConfig({ current: true, next: false });
+                    setSeasonType('view');
                 }
 
                 // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
@@ -282,10 +255,14 @@
             loadAllData();
           }, []); 
 
-          // 切換預排開關時，同步更新目前顯示的季別
+          // 當系統設定改變時，自動修正前台顯示的季別（避免停留在已關閉的季別畫面）
           useEffect(() => {
-              setSeasonType(isPreScheduleEnabled ? 'next' : 'view');
-          }, [isPreScheduleEnabled]);
+              if (!systemConfig.current && systemConfig.next) {
+                  setSeasonType('next');
+              } else if (systemConfig.current && !systemConfig.next) {
+                  setSeasonType('view');
+              }
+          }, [systemConfig]);
 
           useEffect(() => {
               if (!rawData) return;
@@ -298,9 +275,8 @@
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
 
               const transformedPeople = membersData
-                  // 過濾掉所有以 SYSTEM_ 開頭的系統虛擬帳號
-                  .filter(m => m.name && !m.name.startsWith('SYSTEM_')) 
-                  .map(m => {
+                .filter(m => m.name && !m.name.startsWith('SYSTEM_')) 
+                .map(m => {
                       const pRoles = {};
                       
                       const posMap = new Map();
@@ -369,7 +345,6 @@
                       } else {
                           groupedSchedules[key][posName] = memberName;
                       }
-                      // 計算目前所選季別各同工的服事總次數
                       currentStats[memberName] = (currentStats[memberName] || 0) + 1;
                   }
               });
@@ -402,7 +377,7 @@
                 if (!password) return setLoginError('輸入密碼');
                 
                 const { data, error } = await supabase.auth.signInWithPassword({
-                    email: 'tbcadmin@tbc.gmail.com', // 確保 Supabase Auth 有建立這個 Email
+                    email: 'tbcadmin@tbc.gmail.com', 
                     password: password,
                 });
 
@@ -415,6 +390,11 @@
                 setLoginError('');
                 setPassword('');
                 return;
+            }
+
+            // 🛑 門禁防護：如果系統為 NONE (兩者皆關閉)，非管理員禁止登入
+            if (!systemConfig.current && !systemConfig.next) {
+                return setLoginError('系統維護中，暫停使用。');
             }
 
             // --- 一般使用者登入邏輯 ---
@@ -440,32 +420,42 @@
             setCurrentView('login');
           };
 
-          // 🟢 管理員切換預排開關並寫回虛擬同工
-          const handleTogglePreSchedule = async (newValue) => {
+          // 🟢 管理員切換紅綠雙按鈕設定，組合狀態寫回資料庫
+          const handleToggleSystemConfig = async (target) => {
               setIsSyncing(true);
-              const targetStatus = newValue ? 'OPEN' : 'CLOSED';
+              
+              const newConfig = { 
+                  ...systemConfig, 
+                  [target]: !systemConfig[target] 
+              };
+              
+              // 組合 4 種文字狀態
+              let dbStatus = 'NONE';
+              if (newConfig.current && newConfig.next) dbStatus = 'BOTH';
+              else if (newConfig.current) dbStatus = 'CURRENT';
+              else if (newConfig.next) dbStatus = 'NEXT';
               
               const configMember = rawData?.membersData?.find(m => m.name === 'SYSTEM_CONFIG');
 
               let error;
               if (configMember) {
-                  const res = await supabase.from('members').update({ availability_status: targetStatus }).eq('id', configMember.id);
+                  const res = await supabase.from('members').update({ availability_status: dbStatus }).eq('id', configMember.id);
                   error = res.error;
               } else {
-                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_CONFIG', availability_status: targetStatus }]);
+                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_CONFIG', availability_status: dbStatus }]);
                   error = res.error;
               }
               
               if (!error) {
-                  setIsPreScheduleEnabled(newValue);
+                  setSystemConfig(newConfig);
                   setSyncStatus('設定已更新');
                   if (rawData && rawData.membersData) {
                       const updatedMembers = [...rawData.membersData];
                       const idx = updatedMembers.findIndex(m => m.name === 'SYSTEM_CONFIG');
                       if (idx > -1) {
-                          updatedMembers[idx].availability_status = targetStatus;
+                          updatedMembers[idx].availability_status = dbStatus;
                       } else {
-                          updatedMembers.push({ name: 'SYSTEM_CONFIG', availability_status: targetStatus });
+                          updatedMembers.push({ name: 'SYSTEM_CONFIG', availability_status: dbStatus });
                       }
                       setRawData({ ...rawData, membersData: updatedMembers });
                   }
@@ -485,15 +475,15 @@
                       onLogin={handleLogin} loginError={loginError} 
                       isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} 
                       seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} 
-                      isPreScheduleEnabled={isPreScheduleEnabled} 
+                      systemConfig={systemConfig} 
                   />;
               case 'mySchedule': 
                   return <MyScheduleView 
-                      name={name} scheduleData={scheduleData} peopleData={peopleData} statsData={statsData} onLogout={handleLogout} 
+                      name={name} scheduleData={scheduleData} peopleData={peopleData} onLogout={handleLogout} 
                       onRequestSwap={(req) => { setSwapRequest(req); setCurrentView('swapSearch'); }} 
                       seasonType={seasonType} setSeasonType={setSeasonType} 
                       isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} 
-                      isPreScheduleEnabled={isPreScheduleEnabled} onTogglePreSchedule={handleTogglePreSchedule}
+                      systemConfig={systemConfig} onToggleSystemConfig={handleToggleSystemConfig}
                   />;
               case 'swapSearch': 
                   return <SwapSearchView 
@@ -509,7 +499,7 @@
         }
 
         // --- Views ---
-        function LoginView({ name, setName, password, setPassword, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, isPreScheduleEnabled }) {
+        function LoginView({ name, setName, password, setPassword, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, systemConfig }) {
           const isAdmin = name.trim() === 'tbcadmin';
 
           return (
@@ -524,7 +514,8 @@
                     <div>主日服事查詢系統</div>
                   </h2>
                   
-                 {isPreScheduleEnabled && (
+                 {/* 只有在兩者皆開啟時，前台登入頁才顯示切換切換鈕 */}
+                 {systemConfig.current && systemConfig.next && (
                     <div className="mt-6 flex justify-center animate-in fade-in">
                         <div className="bg-slate-100 p-1.5 rounded-xl inline-flex relative">
                             <button 
@@ -582,9 +573,15 @@
           );
         }
 
-        function MyScheduleView({ name, scheduleData, peopleData, statsData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, isPreScheduleEnabled, onTogglePreSchedule }) {
+        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, systemConfig, onToggleSystemConfig }) {
           const [flatShifts, setFlatShifts] = useState([]);
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
+          
+          // 🛑 防護判斷：目前所在的頁籤 (seasonType) 是否有對外開放
+          const isViewAllowed = seasonType === 'view' ? systemConfig.current : systemConfig.next;
+          
+          // 🛑 核心過濾：如果該模式未開放，強制將顯示資料設為空陣列
+          const displayShifts = isViewAllowed ? flatShifts : [];
           
           useEffect(() => {
             const searchName = name.trim();
@@ -673,7 +670,8 @@
                   <div className="flex flex-col">
                       <div className="flex items-center gap-2">
                           <p className="text-[10px] text-slate-400 font-bold uppercase">System User</p>
-                          {isPreScheduleEnabled && (
+                          {/* 只有在兩者皆開啟時，主頁面導覽列才顯示切換按鈕 */}
+                          {systemConfig.current && systemConfig.next && (
                               <button 
                                 onClick={() => setSeasonType(seasonType === 'view' ? 'next' : 'view')}
                                 className={`text-[10px] px-2 py-0.5 rounded-full font-bold border transition-colors flex items-center gap-1 ${
@@ -687,31 +685,8 @@
                               </button>
                           )}
                       </div>
-                      <div className="flex flex-col">
-                        <h2 className="text-lg font-black text-slate-800 leading-tight">{name}</h2>
-                        {/* 這裡插入登入者的專屬徽章 */}
-                        {(() => {
-                            const currentUser = peopleData.find(p => p.name === name);
-                            const userStats = statsData[name] || 0;
-                            const myBadges = getMemberBadges(currentUser, userStats);
-                            
-                            if (myBadges.length > 0) {
-                                return (
-                                    <div className="flex flex-wrap gap-1 mt-0.5">
-                                        {myBadges.map(badge => {
-                                            const IconComponent = badge.icon;
-                                            return (
-                                                <span key={badge.id} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold border shadow-sm ${badge.color}`}>
-                                                    <IconComponent size={10} />
-                                                    {badge.name}
-                                                </span>
-                                            );
-                                        })}
-                                    </div>
-                                );
-                            }
-                            return null;
-                        })()}
+                      <div className="flex items-center gap-1">
+                        <h2 className="text-lg font-black text-slate-800">{name}</h2>
                       </div>
                   </div>
                 </div>
@@ -723,26 +698,51 @@
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
                 
-                {/* 🛠️ 管理員控制面板 */}
+                {/* 🛠️ 管理員控制面板 (獨立二按鈕紅綠開關) */}
                 {name === 'tbcadmin' && (
                   <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-3">
                       <div>
-                        <h4 className="font-black text-base flex items-center gap-2">
-                          <Lock size={16} className="text-emerald-400" /> 管理員控制面板
+                        <h4 className="font-black text-base flex items-center gap-2 mb-1">
+                          <Lock size={16} className="text-emerald-400" /> 控制面板
                         </h4>
-                      </div>
+                        </div>
                       
-                      <button
-                        onClick={() => onTogglePreSchedule(!isPreScheduleEnabled)}
-                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all shadow-md active:scale-95 whitespace-nowrap ml-4 ${
-                          isPreScheduleEnabled 
-                            ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-900/30' 
-                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                        }`}
-                      >
-                        {isPreScheduleEnabled ? '● 開啟預排班表' : '○ 關閉預排班表'}
-                      </button>
+                      <div className="flex flex-col sm:flex-row gap-3 mt-2">
+                        {/* 服事班表獨立開關 */}
+                        <button
+                          onClick={() => onToggleSystemConfig('current')}
+                          type="button"
+                          className={`flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
+                            systemConfig.current 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
+                              : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                          }`}
+                        >
+                          <span>服事班表 ({seasonLabels.current})</span>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${systemConfig.current ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
+                            {systemConfig.current ? 'Open' : 'Close'}
+                          </div>
+                        </button>
+
+                        {/* 預排班表獨立開關 */}
+                        <button
+                          onClick={() => onToggleSystemConfig('next')}
+                          type="button"
+                          className={`flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
+                            systemConfig.next 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
+                              : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                          }`}
+                        >
+                          <span>預排班表 ({seasonLabels.next})</span>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${systemConfig.next ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
+                            {systemConfig.next ? 'Open' : 'Close'}
+                          </div>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -773,8 +773,8 @@
                     </div>
                   </div>
                 ) : (
-                  flatShifts.length > 0 ? (
-                    flatShifts.map((shift, index) => {
+                  displayShifts.length > 0 ? (
+                    displayShifts.map((shift, index) => {
                       const rConfig = ROLE_CONFIG[shift.role] || ROLE_CONFIG['預設'];
                       const textColorClass = rConfig.color.split(' ')[1] || 'text-slate-800';
                       return (
@@ -815,8 +815,12 @@
                     <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
                       <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Briefcase size={40} /></div>
                       <p className="text-slate-400 font-bold text-lg">查無資料</p>
+                      
+                      {/* 🛑 依據開放狀態顯示對應的訊息 */}
                       <p className="text-sm text-slate-300 mt-1">
-                          {seasonType === 'view' ? `${seasonLabels.current} 沒有排班，好好休息` : `${seasonLabels.next} 沒有排班，好好休息`}
+                          {!isViewAllowed 
+                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，暫停使用。') 
+                              : '目前季度沒有您的排班，好好休息'}
                       </p>
                     </div>
                   )
@@ -1042,28 +1046,6 @@
                                         </div>
                                     )}
                                   </div>
-
-                                  {/* 這裡插入推薦同工的專屬徽章 */}
-                                  {(() => {
-                                      const badges = getMemberBadges(person, person.stats);
-                                      if (badges.length > 0) {
-                                          return (
-                                              <div className="flex flex-wrap items-center gap-1 mt-1.5 mb-1">
-                                                  {badges.map(badge => {
-                                                      const IconComponent = badge.icon;
-                                                      return (
-                                                          <span key={badge.id} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold border shadow-sm ${badge.color}`}>
-                                                              <IconComponent size={10} />
-                                                              {badge.name}
-                                                          </span>
-                                                      );
-                                                  })}
-                                              </div>
-                                          );
-                                      }
-                                      return null;
-                                  })()}
-
                                   <div className="flex items-center gap-1 text-xs font-bold text-slate-400 mt-1 flex-wrap">
                                     <span className="bg-slate-100 px-1.5 py-0.5 rounded">{person.session}</span>
                                     
@@ -1086,18 +1068,17 @@
                                 <p className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1"><RefreshCw size={12} /> 雙方可以互換的班次：</p>
                                 <div className="flex flex-wrap gap-2">
                                   {person.swapOptions.map((swap, i) => {
-                                      const parts = swap.date.split('/');
-                                      const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
-                                      return (
-                                        <div key={i} className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
-                                            <span className="font-bold">{formattedDate}</span>
-                                            {/* 修正：如果崗位是執事輪值，隱藏堂別資訊 */}
-                                            <span className="opacity-70">
-                                                ({swap.role}{swap.role !== '執事輪值' && ` • ${swap.session}`})
-                                            </span>
-                                        </div>
-                                      );
-                                  })}
+    const parts = swap.date.split('/');
+    const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
+    return (
+      <div key={i} className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
+          <span className="font-bold">{formattedDate}</span>
+          <span className="opacity-70">
+              ({swap.role}{swap.role !== '執事輪值' && ` • ${swap.session}`})
+          </span>
+      </div>
+    );
+})}
                                 </div>
                               </div>
                             ) : (
