@@ -56,8 +56,8 @@
         import { createClient } from '@supabase/supabase-js';
 
         // --- Supabase 初始化設定 ---
-        const SUPABASE_URL = "https://iwmkzsredvbgcqvqlayn.supabase.co";
-        const SUPABASE_KEY = "sb_publishable_GwDMLoXcHaTzQDCcQlDuGw_4J9mwiaA";
+        const SUPABASE_URL = "https://jtjgqrqbewbgxscytkod.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_TcixlGOMSLBSZNoMNOp6Ng_B-N4Tw1K";
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         
         // --- 儲存輔助函式 ---
@@ -1068,15 +1068,17 @@
                                 <p className="text-sm font-bold text-slate-400 mb-2 flex items-center gap-1"><RefreshCw size={12} /> 雙方可以互換的班次：</p>
                                 <div className="flex flex-wrap gap-2">
                                   {person.swapOptions.map((swap, i) => {
-                                      const parts = swap.date.split('/');
-                                      const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
-                                      return (
-                                        <div key={i} className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
-                                            <span className="font-bold">{formattedDate}</span>
-                                            <span className="opacity-70">({swap.role} • {swap.session})</span>
-                                        </div>
-                                      );
-                                  })}
+    const parts = swap.date.split('/');
+    const formattedDate = parts.length === 3 ? `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}` : swap.date;
+    return (
+      <div key={i} className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 flex items-center gap-1">
+          <span className="font-bold">{formattedDate}</span>
+          <span className="opacity-70">
+              ({swap.role}{swap.role !== '執事輪值' && ` • ${swap.session}`})
+          </span>
+      </div>
+    );
+})}
                                 </div>
                               </div>
                             ) : (
