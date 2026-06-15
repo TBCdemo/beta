@@ -582,6 +582,22 @@
           
           // 🛑 核心過濾：如果該模式未開放，強制將顯示資料設為空陣列
           const displayShifts = isViewAllowed ? flatShifts : [];
+
+          // 🟢 依「日期」進行群組化的資料整整邏輯
+          const groupedShifts = useMemo(() => {
+            const groups = {};
+            displayShifts.forEach(shift => {
+                if (!groups[shift.date]) {
+                    groups[shift.date] = { 
+                        date: shift.date, 
+                        dateObj: shift.dateObj, 
+                        shifts: [] 
+                    };
+                }
+                groups[shift.date].shifts.push(shift);
+            });
+            return Object.values(groups).sort((a, b) => a.dateObj - b.dateObj);
+          }, [displayShifts]);
           
           useEffect(() => {
             const searchName = name.trim();
@@ -774,43 +790,56 @@
                   </div>
                 ) : (
                   displayShifts.length > 0 ? (
-                    displayShifts.map((shift, index) => {
-                      const rConfig = ROLE_CONFIG[shift.role] || ROLE_CONFIG['預設'];
-                      const textColorClass = rConfig.color.split(' ')[1] || 'text-slate-800';
-                      return (
-                        <div key={index} className="bg-white rounded-[1.5rem] p-5 shadow-sm border border-slate-200 flex items-center justify-between gap-4 animate-in fade-in transition-transform hover:scale-[1.01]" style={{animationDelay: `${index * 50}ms`}}>
-                          <div className="flex flex-col gap-1 flex-grow">
-                             <span className={`text-xl font-black tracking-tight leading-tight ${textColorClass} flex items-center gap-2`}>
-                               {shift.role}
-                               {shift.shiftNumber && <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-current text-xs font-bold shrink-0">{shift.shiftNumber}</span>}
-                             </span>
-                             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
-                                <div className="flex items-center gap-1.5"><Calendar size={14} className="text-slate-400"/><span>{shift.date}</span></div>
-                                <span className="text-slate-300">|</span><span className="bg-slate-100 px-2 py-0.5 rounded text-xs">{shift.session}</span>
-                             </div>
-                          </div>
-                          
-                          <div className="flex flex-col gap-2">
-                              {/* 只有在目前服事表 (seasonType === 'view') 時才顯示 加入行事曆 與 換班查詢 */}
-                              {seasonType === 'view' && (
-                                <>
-                                    <a 
-                                        href={getGoogleCalendarUrl(shift)} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
-                                    >
-                                        加入行事曆
-                                    </a>
-                                    <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
-                                      換班查詢
-                                    </button>
-                                </>
-                              )}
-                          </div>
+                    groupedShifts.map((dayGroup, index) => (
+                      <div key={index} className="bg-white rounded-[1.5rem] p-5 shadow-sm border border-slate-200 flex flex-col gap-4 animate-in fade-in transition-transform hover:scale-[1.01]" style={{animationDelay: `${index * 50}ms`}}>
+                        
+                        {/* 區塊標頭：同一天只顯示一個日期 */}
+                        <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                          <Calendar size={18} className="text-slate-400"/>
+                          <span className="font-bold text-slate-700">{dayGroup.date}</span>
                         </div>
-                      );
-                    })
+
+                        {/* 區塊內容：該日期下的多個服事項目 */}
+                        <div className="flex flex-col gap-4">
+                          {dayGroup.shifts.map((shift, i) => {
+                            const rConfig = ROLE_CONFIG[shift.role] || ROLE_CONFIG['預設'];
+                            const textColorClass = rConfig.color.split(' ')[1] || 'text-slate-800';
+                            return (
+                              <div key={i} className={`flex items-center justify-between gap-4 ${i > 0 ? 'border-t border-slate-100 pt-4' : ''}`}>
+                                <div className="flex flex-col gap-1 flex-grow">
+                                   <span className={`text-xl font-black tracking-tight leading-tight ${textColorClass} flex items-center gap-2`}>
+                                     {shift.role}
+                                     {shift.shiftNumber && <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-current text-xs font-bold shrink-0">{shift.shiftNumber}</span>}
+                                   </span>
+                                   <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
+                                      <span className="bg-slate-100 px-2 py-0.5 rounded text-xs">{shift.session}</span>
+                                   </div>
+                                </div>
+                                
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    {/* 只有在目前服事表 (seasonType === 'view') 時才顯示 按鈕 */}
+                                    {seasonType === 'view' && (
+                                      <>
+                                          <a 
+                                              href={getGoogleCalendarUrl(shift)} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer"
+                                              className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
+                                          >
+                                              加入行事曆
+                                          </a>
+                                          <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
+                                            換班查詢
+                                          </button>
+                                      </>
+                                    )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
                   ) : (
                     <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
                       <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Briefcase size={40} /></div>
