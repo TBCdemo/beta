@@ -182,6 +182,9 @@
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
 
+          // --- 新增預排表按鈕控制狀態 ---
+          const [nextButtonsConfig, setNextButtonsConfig] = useState(false);
+
           useEffect(() => {
             const loadAllData = async () => {
               setIsSyncing(true);
@@ -214,6 +217,14 @@
                 } else {
                     setSystemConfig({ current: true, next: false });
                     setSeasonType('view');
+                }
+
+                // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
+                const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
+                if (buttonConfigMember) {
+                    setNextButtonsConfig(buttonConfigMember.availability_status === 'ON');
+                } else {
+                    setNextButtonsConfig(false);
                 }
 
                 // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
@@ -466,6 +477,43 @@
               setTimeout(() => setIsSyncing(false), 500);
           };
 
+          // 🟢 新增切換預排表按鈕的專屬函式
+          const handleToggleNextButtons = async () => {
+              setIsSyncing(true);
+              const newState = !nextButtonsConfig;
+              const dbStatus = newState ? 'ON' : 'OFF';
+
+              const configMember = rawData?.membersData?.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
+
+              let error;
+              if (configMember) {
+                  const res = await supabase.from('members').update({ availability_status: dbStatus }).eq('id', configMember.id);
+                  error = res.error;
+              } else {
+                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_NEXT_BUTTONS', availability_status: dbStatus }]);
+                  error = res.error;
+              }
+
+              if (!error) {
+                  setNextButtonsConfig(newState);
+                  setSyncStatus('按鈕設定已更新');
+                  if (rawData && rawData.membersData) {
+                      const updatedMembers = [...rawData.membersData];
+                      const idx = updatedMembers.findIndex(m => m.name === 'SYSTEM_NEXT_BUTTONS');
+                      if (idx > -1) {
+                          updatedMembers[idx].availability_status = dbStatus;
+                      } else {
+                          updatedMembers.push({ name: 'SYSTEM_NEXT_BUTTONS', availability_status: dbStatus });
+                      }
+                      setRawData({ ...rawData, membersData: updatedMembers });
+                  }
+              } else {
+                  alert('更新失敗，請檢查權限');
+                  console.error(error);
+              }
+              setTimeout(() => setIsSyncing(false), 500);
+          };
+
           const renderView = () => {
             switch (currentView) {
               case 'login': 
@@ -484,6 +532,7 @@
                       seasonType={seasonType} setSeasonType={setSeasonType} 
                       isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} 
                       systemConfig={systemConfig} onToggleSystemConfig={handleToggleSystemConfig}
+                      nextButtonsConfig={nextButtonsConfig} onToggleNextButtons={handleToggleNextButtons}
                   />;
               case 'swapSearch': 
                   return <SwapSearchView 
@@ -538,7 +587,7 @@
                     </div>
                   )}
 
-                  <p className="text-slate-400 mt-4 text-sm font-semibold">
+                  <p className="text-slate-400 mt-4 text-base font-semibold">
                     在安息中服事，在服事中成長
                   </p>
                 </div>
@@ -573,7 +622,7 @@
           );
         }
 
-        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, systemConfig, onToggleSystemConfig }) {
+        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, systemConfig, onToggleSystemConfig, nextButtonsConfig, onToggleNextButtons }) {
           const [flatShifts, setFlatShifts] = useState([]);
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           
@@ -759,6 +808,24 @@
                           </div>
                         </button>
                       </div>
+
+                      {/* 預排表功能按鈕獨立開關 */}
+                      <button
+                        onClick={onToggleNextButtons}
+                        type="button"
+                        className={`mt-1 w-full py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
+                          nextButtonsConfig 
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' 
+                            : 'bg-slate-500/10 text-slate-400 border-slate-500/30 hover:bg-slate-500/20'
+                        }`}
+                      >
+                        <span>預排表按鈕功能 (換班/行事曆)</span>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${nextButtonsConfig ? 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.8)]' : 'bg-slate-400'}`}></div>
+                          {nextButtonsConfig ? 'Open' : 'Close'}
+                        </div>
+                      </button>
+
                     </div>
                   </div>
                 )}
@@ -817,8 +884,8 @@
                                 </div>
                                 
                                 <div className="flex flex-col sm:flex-row gap-2">
-                                    {/* 只有在目前服事表 (seasonType === 'view') 時才顯示 按鈕 */}
-                                    {seasonType === 'view' && (
+                                    {/* 顯示條件：目前季度的服事表，或者 (預排表 且 管理員有開啟按鈕功能) */}
+                                    {(seasonType === 'view' || (seasonType === 'next' && nextButtonsConfig)) && (
                                       <>
                                           <a 
                                               href={getGoogleCalendarUrl(shift)} 
