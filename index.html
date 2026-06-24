@@ -186,17 +186,35 @@
           const [nextButtonsConfig, setNextButtonsConfig] = useState(false);
 
           useEffect(() => {
-            const loadAllData = async () => {
-              setIsSyncing(true);
-              setProgress(10);
+    const loadAllData = async () => {
+        setIsSyncing(true);
+        setProgress(10);
 
-              try {
-                const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
-                    fetchAll('members', '*'),
-                    fetchAll('positions', '*'),
-                    fetchAll('member_positions', '*'),
-                    fetchAll('member_quarter_settings', '*')
-                ]);
+        try {
+            // 🛡️ 新增：步驟 A - 靜默登入公用唯讀帳號
+            // 讓系統在背景自動取得 authenticated (已驗證) 的身分
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email: 'viewer@tbc.gmail.com',
+                password: 'Tbc_public_viewer_2026!'
+            });
+
+            if (authError) {
+                console.error("授權連線失敗", authError);
+                setSyncStatus('連線異常，稍後再試');
+                setTimeout(() => setIsSyncing(false), 500);
+                return; // 登入失敗就停止往下執行
+            }
+            // ------------------------------------------------
+
+            // 步驟 B - 開始抓取資料 (此時已經有權限了)
+            const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
+                fetchAll('members', '*'),
+                fetchAll('positions', '*'),
+                fetchAll('member_positions', '*'),
+                fetchAll('member_quarter_settings', '*')
+            ]);
+            
+            // ... 下方保留你原本的程式碼 (尋找 SYSTEM_CONFIG 等邏輯) ...
 
                 // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
                 const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
