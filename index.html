@@ -919,9 +919,9 @@
                   const newDate = newDateParts.length === 3 ? `${newDateParts[0]}/${newDateParts[1].padStart(2, '0')}/${newDateParts[2].padStart(2, '0')}` : swapInfo.date;
                   const newRoleStr = swapInfo.role !== '執事輪值' ? `${swapInfo.session} • ${swapInfo.role}` : swapInfo.role;
                   
-                  text = `平安！\n\n因同工臨時有事，是否可以協調互換以下班次：\n\n📌 ${targetOwner}\n• ${currentDate}【${currentRoleStr}】\n\n📌 ${personName}\n• ${newDate}【${newRoleStr}】\n\n若同意換班，請直接回覆，我們將協助完成換班登記\n\n謝謝你的協助！`;
+                  text = `平安！\n\n因臨時有事，請問是否可以協調互換以下班次：\n\n📌 ${targetOwner}\n• ${currentDate}【${currentRoleStr}】\n\n📌 ${personName}\n• ${newDate}【${newRoleStr}】\n\n若方便協助，請告知；若不方便也沒關係，再請回覆，謝謝你。`;
               } else {
-                  text = `平安！\n\n因同工臨時有事，請問是否可以協助替補以下服事：\n\n📌 日期：${currentDate}\n📌 崗位：【${currentRoleStr}】\n\n若可以協助，請回覆「可以」；若不方便也請告知，謝謝您的幫忙！`;
+                  text = `平安！\n\n因臨時有事，請問是否可以協助替補以下服事：\n\n📌 日期：${currentDate}\n📌 崗位：【${currentRoleStr}】\n\n若方便協助，請告知；若不方便也沒關係，再請回覆，謝謝你。`;
               }
 
               navigator.clipboard.writeText(text).then(() => {
@@ -929,7 +929,7 @@
                   setCopiedIndex(uniqueId);
                   setTimeout(() => setCopiedIndex(null), 2000);
               }).catch(err => {
-                  alert('複製失敗，請手動複製');
+                  alert('複製失敗');
               });
           };
 
