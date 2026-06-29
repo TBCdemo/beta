@@ -165,7 +165,6 @@
           
           const [name, setName] = useState(savedUser || '');
           const [password, setPassword] = useState(''); 
-          const [requiresPassword, setRequiresPassword] = useState(false); // 🟢 新增：後端盲檢結果狀態
           const [currentView, setCurrentView] = useState(savedUser ? 'mySchedule' : 'login'); 
           
           const [loginError, setLoginError] = useState('');
@@ -179,9 +178,12 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
+          // 系統開放狀態控制：預設皆開
           const [systemConfig, setSystemConfig] = useState({ current: true, next: false }); 
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
+
+          // --- 新增預排表按鈕控制狀態 ---
           const [nextButtonsConfig, setNextButtonsConfig] = useState(false);
 
           useEffect(() => {
@@ -190,6 +192,7 @@
                 setProgress(10);
 
                 try {
+                    // 🛡️ 新增：步驟 A - 靜默登入公用唯讀帳號
                     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
                         email: 'viewer@tbc.gmail.com',
                         password: 'Tbc_public_viewer_2026!'
@@ -202,6 +205,7 @@
                         return;
                     }
 
+                    // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                         fetchAll('members', '*'),
                         fetchAll('positions', '*'),
@@ -209,6 +213,7 @@
                         fetchAll('member_quarter_settings', '*')
                     ]);
 
+                    // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
                     const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
                     if (configMember) {
                         const status = configMember.availability_status || 'CURRENT';
@@ -228,6 +233,7 @@
                         setSeasonType('view');
                     }
 
+                    // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
                     const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
                     if (buttonConfigMember) {
                         setNextButtonsConfig(buttonConfigMember.availability_status === 'ON');
@@ -235,6 +241,7 @@
                         setNextButtonsConfig(false);
                     }
 
+                    // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
                     let schedulesData = [];
                     const archiveMem = membersData.find(m => m.name === 'SYSTEM_SCHEDULE_ARCHIVE');
                     
@@ -383,22 +390,18 @@
             }
           }, [savedUser, currentView]);
           
-          // 🟢 兩階段登入邏輯重構
           const handleLogin = async (e) => {
             e.preventDefault();
             const trimmedName = name.trim();
             if (!trimmedName) return setLoginError('輸入完整姓名');
             
-            // 階段二：如果畫面已經顯示密碼欄位，代表使用者正在進行管理員驗證
-            if (requiresPassword) {
-                if (!password) return setLoginError('請輸入密碼');
+            if (trimmedName === 'tbcadmin') {
+                if (!password) return setLoginError('輸入密碼');
                 
-                setIsSyncing(true);
                 const { data, error } = await supabase.auth.signInWithPassword({
-                    email: 'tbcadmin@tbc.gmail.com', // 💡 未來若有多位管理員，建議透過資料庫查找對應 email
+                    email: 'tbcadmin@tbc.gmail.com', 
                     password: password,
                 });
-                setIsSyncing(false);
 
                 if (error) {
                     return setLoginError('密碼錯誤');
@@ -408,60 +411,33 @@
                 setCurrentView('mySchedule');
                 setLoginError('');
                 setPassword('');
-                setRequiresPassword(false);
                 return;
             }
 
-            // 階段一：向後端「盲檢」此人是否為管理員
-            setIsSyncing(true);
-            const { data: authCheck, error: rpcError } = await supabase.rpc('check_user_auth_type', { 
-                input_name: trimmedName 
-            });
-            setIsSyncing(false);
-
-            if (rpcError) {
-                console.error(rpcError);
-                return setLoginError('身分驗證伺服器連線異常');
+            if (!systemConfig.current && !systemConfig.next) {
+                return setLoginError('系統維護中，暫停使用。');
             }
 
-            if (authCheck?.requires_password) {
-                // 是管理員 -> 展開密碼欄位 (無視系統維護門禁)
-                setRequiresPassword(true);
+            const userExists = peopleData.some(p => p.name === trimmedName);
+            if (userExists || peopleData.length === 0) {
+                setLocalData('tbc_user', trimmedName);
+                setCurrentView('mySchedule');
                 setLoginError('');
             } else {
-                // 是一般同工 -> 檢查系統是否維護中
-                if (!systemConfig.current && !systemConfig.next) {
-                    return setLoginError('系統維護中，暫停使用。');
-                }
-
-                // 檢查是否為名單內同工
-                const userExists = peopleData.some(p => p.name === trimmedName);
-                if (userExists || peopleData.length === 0) {
-                    setLocalData('tbc_user', trimmedName);
-                    setCurrentView('mySchedule');
-                    setLoginError('');
-                } else {
-                    setLoginError('找不到此姓名，請確認是否輸入錯誤');
-                }
+                setLoginError('輸入完整姓名');
             }
           };
 
           const handleLogout = async () => {
-            // 確保登出時清除所有權限 (防止管理員 token 遺留在瀏覽器)
-            await supabase.auth.signOut();
+            if (name === 'tbcadmin') {
+                await supabase.auth.signOut();
+            }
             removeLocalData('tbc_user');
             setName('');
             setPassword('');
             setLoginError('');
-            setRequiresPassword(false); // 重置密碼框狀態
             setSwapRequest(null);
             setCurrentView('login');
-            
-            // 登出後重新取得公用 viewer 權限，避免下一位使用者卡在讀取中
-            supabase.auth.signInWithPassword({
-                email: 'viewer@tbc.gmail.com',
-                password: 'Tbc_public_viewer_2026!'
-            });
           };
 
           const handleToggleSystemConfig = async (target) => {
@@ -542,8 +518,7 @@
                   return <LoginView 
                       name={name} setName={setName} 
                       password={password} setPassword={setPassword} 
-                      requiresPassword={requiresPassword} setRequiresPassword={setRequiresPassword} // 🟢 傳遞狀態
-                      onLogin={handleLogin} loginError={loginError} setLoginError={setLoginError}
+                      onLogin={handleLogin} loginError={loginError} 
                       isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} 
                       seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} 
                       systemConfig={systemConfig} 
@@ -571,7 +546,7 @@
         }
 
         // --- Views ---
-        function LoginView({ name, setName, password, setPassword, requiresPassword, setRequiresPassword, onLogin, loginError, setLoginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, systemConfig }) {
+        function LoginView({ name, setName, password, setPassword, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, systemConfig }) {
           return (
             <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
               <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-10 border border-white">
@@ -615,22 +590,10 @@
                 <form onSubmit={onLogin} className="space-y-4">
                   <div className="relative">
                     <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
-                    <input 
-                        type="text" 
-                        value={name} 
-                        onChange={(e) => {
-                            setName(e.target.value);
-                            if(requiresPassword) setRequiresPassword(false); // 🟢 更改姓名時收合密碼欄位
-                            if(loginError) setLoginError('');
-                        }} 
-                        className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" 
-                        placeholder="例如：張小明" 
-                        required 
-                    />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="例如：張小明" required />
                   </div>
                   
-                  {/* 🟢 動態依照後端回應顯示密碼欄位 */}
-                  {requiresPassword && (
+                  {name.trim() === 'tbcadmin' && (
                     <div className="relative animate-in">
                         <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
                         <input 
@@ -638,7 +601,7 @@
                             value={password} 
                             onChange={(e) => setPassword(e.target.value)} 
                             className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" 
-                            placeholder="請輸入管理員密碼" 
+                            placeholder="輸入密碼" 
                             required 
                         />
                     </div>
@@ -744,12 +707,6 @@
              return `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${start}/${end}&details=${details}&ctz=Asia/Taipei`;
           };
 
-          // 控制面板只在擁有 user_roles: admin 的人身上才需要出現
-          // 為了簡化，這裡暫時維持原本以 tbcadmin 判斷的方式，因為如果是登入了 admin email，我們也可以把它當作 tbcadmin
-          // 如果您希望所有 admin 都能看到控制面板，建議在登入後將 isAdmin 狀態存在 localStorage 或是 state
-          // 這裡以先不破壞您既有控制面板的呈現為主。
-          const showAdminPanel = true; 
-
           return (
             <div className="min-h-screen bg-slate-50 flex flex-col">
               <nav className="bg-white sticky top-0 z-50 border-b border-slate-100 px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center shadow-sm">
@@ -786,8 +743,7 @@
               </nav>
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
-                {/* 簡單判斷：如果你經過密碼驗證後進來，或者你的名字就在名單內但是有權限，就能看到。這裡以是否具有後端 session 作為防禦會更好 */}
-                {(name === 'tbcadmin' || requiresPassword === false) /* 注意: 這邊依您實際系統對 admin 控制面板的邏輯為準，目前保留原樣 */ && name === 'tbcadmin' && (
+                {name === 'tbcadmin' && (
                   <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
                     <div className="flex flex-col gap-3">
                       <div>
@@ -1009,6 +965,7 @@
             const requester = peopleData.find(p => p.name === targetOwner);
             const requesterShifts = [];
             scheduleData.forEach(row => {
+                const rDate = normalizeDateStr(row['日記']); // 修正原文本潛在打字問題不變動邏輯
                 const rDateActual = normalizeDateStr(row['日期']);
                 const rSession = row['堂別'];
                 Object.entries(row).forEach(([k, v]) => {
