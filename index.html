@@ -496,7 +496,7 @@
                       setRawData({ ...rawData, membersData: updatedMembers });
                   }
               } else {
-                  alert('更新失敗，檢查權限');
+                  alert('更新失敗，請檢查權限');
                   console.error(error);
               }
               setTimeout(() => setIsSyncing(false), 500);
@@ -530,7 +530,7 @@
                       setRawData({ ...rawData, membersData: updatedMembers });
                   }
               } else {
-                  alert('更新失敗，檢查權限');
+                  alert('更新失敗，請檢查權限');
                   console.error(error);
               }
               setTimeout(() => setIsSyncing(false), 500);
@@ -607,7 +607,7 @@
                     </div>
                   )}
 
-                  <p className="text-slate-400 mt-4 text-sm font-semibold">
+                  <p className="text-slate-400 mt-4 text-base font-semibold">
                     在安息中服事，在服事中成長
                   </p>
                 </div>
@@ -928,7 +928,7 @@
                       <p className="text-slate-400 font-bold text-lg">查無資料</p>
                       <p className="text-sm text-slate-300 mt-1">
                           {!isViewAllowed 
-                              ? (name === 'tbcadmin' ? '關閉班表前台顯示' : '系統維護中，暫停使用') 
+                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，暫停使用。') 
                               : '目前季度沒有您的排班，好好休息'}
                       </p>
                     </div>
@@ -973,7 +973,7 @@
                   setCopiedIndex(uniqueId);
                   setTimeout(() => setCopiedIndex(null), 2000);
               }).catch(err => {
-                  alert('複製失敗');
+                  alert('複製失敗，請手動複製');
               });
           };
 
@@ -1217,7 +1217,7 @@
                                           <button 
                                               onClick={() => handleCopy('swap', person.name, swap)}
                                               className={`p-1.5 rounded-md transition-colors flex items-center justify-center shrink-0 ${isCopied ? 'bg-emerald-100 text-emerald-600' : 'hover:bg-indigo-100 text-indigo-400 hover:text-indigo-600'}`}
-                                              title="複製"
+                                              title="複製換班資訊"
                                           >
                                               {isCopied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} />}
                                           </button>
@@ -1236,7 +1236,7 @@
                                     className={`text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 font-bold ${copiedId === `${person.name}-substitute` ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100'}`}
                                 >
                                     {copiedId === `${person.name}-substitute` ? <Check size={14} strokeWidth={3}/> : <Copy size={14}/>} 
-                                    複製
+                                    複製替補文案
                                 </button>
                               </div>
                             )}
@@ -1246,7 +1246,8 @@
                       <div className="p-10 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
                         <UserX className="mx-auto mb-4 opacity-30" size={48} />
                         <p className="font-bold">找不到合適人選</p>
-                                             </div>
+                        <p className="text-[10px] mt-2">同工可能已請假、暫停服事，或不符合條件</p>
+                      </div>
                     )}
                   </div>
                 )}
