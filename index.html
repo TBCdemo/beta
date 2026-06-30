@@ -289,7 +289,7 @@
               const targetQStr = seasonType === 'view' 
                   ? getQuarterStr(today) 
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
-
+console.log("2026-Q3:", targetQStr, "view", seasonType);
               const transformedPeople = membersData
                 .filter(m => m.name && !m.name.startsWith('SYSTEM_')) 
                 .map(m => {
