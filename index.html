@@ -51,7 +51,7 @@
         import { 
           Calendar, User, LogOut, Heart, Monitor, Users, Smile, BookOpen, 
           Coffee, RefreshCw, AlertCircle, ArrowLeft, UserCheck, HandHeart, 
-          Clock, Briefcase, Info, Lock, Unlock, Link as LinkIcon, X, Timer, UserX, CalendarPlus,
+          Clock, Briefcase, Info, Link as LinkIcon, X, Timer, UserX, CalendarPlus,
           Copy, Check
         } from 'lucide-react';
         import { createClient } from '@supabase/supabase-js';
@@ -126,7 +126,7 @@
             const month = now.getMonth() + 1;
             if (month >= 1 && month <= 3) return { current: '1-3月', next: '4-6月' };
             if (month >= 4 && month <= 6) return { current: '4-6月', next: '7-9月' };
-            if (month >= 7 && month <= 9) return { current: '4-6月', next: '10-12月' };
+            if (month >= 7 && month <= 9) return { current: '7-9月', next: '10-12月' };
             return { current: '10-12月', next: '1-3月' };
         };
 
@@ -164,7 +164,6 @@
           const savedUser = getLocalData('tbc_user');
           
           const [name, setName] = useState(savedUser || '');
-          const [password, setPassword] = useState(''); 
           const [currentView, setCurrentView] = useState(savedUser ? 'mySchedule' : 'login'); 
           
           const [loginError, setLoginError] = useState('');
@@ -183,7 +182,6 @@
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
 
-          // --- 新增預排表按鈕控制狀態 ---
           const [nextButtonsConfig, setNextButtonsConfig] = useState(false);
 
           useEffect(() => {
@@ -192,7 +190,7 @@
                 setProgress(10);
 
                 try {
-                    // 🛡️ 新增：步驟 A - 靜默登入公用唯讀帳號
+                    // 🛡️ 靜默登入公用唯讀帳號
                     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
                         email: 'viewer@tbc.gmail.com',
                         password: 'Tbc_public_viewer_2026!'
@@ -394,25 +392,6 @@
             e.preventDefault();
             const trimmedName = name.trim();
             if (!trimmedName) return setLoginError('輸入完整姓名');
-            
-            if (trimmedName === 'tbcadmin') {
-                if (!password) return setLoginError('輸入密碼');
-                
-                const { data, error } = await supabase.auth.signInWithPassword({
-                    email: 'tbcadmin@tbc.gmail.com', 
-                    password: password,
-                });
-
-                if (error) {
-                    return setLoginError('密碼錯誤');
-                }
-
-                setLocalData('tbc_user', trimmedName);
-                setCurrentView('mySchedule');
-                setLoginError('');
-                setPassword('');
-                return;
-            }
 
             if (!systemConfig.current && !systemConfig.next) {
                 return setLoginError('系統維護中，暫停使用。');
@@ -424,92 +403,16 @@
                 setCurrentView('mySchedule');
                 setLoginError('');
             } else {
-                setLoginError('輸入完整姓名');
+                setLoginError('找不到您的資料，請確認全名。');
             }
           };
 
           const handleLogout = async () => {
-            if (name === 'tbcadmin') {
-                await supabase.auth.signOut();
-            }
             removeLocalData('tbc_user');
             setName('');
-            setPassword('');
             setLoginError('');
             setSwapRequest(null);
             setCurrentView('login');
-          };
-
-          const handleToggleSystemConfig = async (target) => {
-              setIsSyncing(true);
-              const newConfig = { ...systemConfig, [target]: !systemConfig[target] };
-              let dbStatus = 'NONE';
-              if (newConfig.current && newConfig.next) dbStatus = 'BOTH';
-              else if (newConfig.current) dbStatus = 'CURRENT';
-              else if (newConfig.next) dbStatus = 'NEXT';
-              
-              const configMember = rawData?.membersData?.find(m => m.name === 'SYSTEM_CONFIG');
-              let error;
-              if (configMember) {
-                  const res = await supabase.from('members').update({ availability_status: dbStatus }).eq('id', configMember.id);
-                  error = res.error;
-              } else {
-                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_CONFIG', availability_status: dbStatus }]);
-                  error = res.error;
-              }
-              
-              if (!error) {
-                  setSystemConfig(newConfig);
-                  setSyncStatus('設定已更新');
-                  if (rawData && rawData.membersData) {
-                      const updatedMembers = [...rawData.membersData];
-                      const idx = updatedMembers.findIndex(m => m.name === 'SYSTEM_CONFIG');
-                      if (idx > -1) {
-                          updatedMembers[idx].availability_status = dbStatus;
-                      } else {
-                          updatedMembers.push({ name: 'SYSTEM_CONFIG', availability_status: dbStatus });
-                      }
-                      setRawData({ ...rawData, membersData: updatedMembers });
-                  }
-              } else {
-                  alert('更新失敗，請檢查權限');
-                  console.error(error);
-              }
-              setTimeout(() => setIsSyncing(false), 500);
-          };
-
-          const handleToggleNextButtons = async () => {
-              setIsSyncing(true);
-              const newState = !nextButtonsConfig;
-              const dbStatus = newState ? 'ON' : 'OFF';
-              const configMember = rawData?.membersData?.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
-              let error;
-              if (configMember) {
-                  const res = await supabase.from('members').update({ availability_status: dbStatus }).eq('id', configMember.id);
-                  error = res.error;
-              } else {
-                  const res = await supabase.from('members').insert([{ name: 'SYSTEM_NEXT_BUTTONS', availability_status: dbStatus }]);
-                  error = res.error;
-              }
-
-              if (!error) {
-                  setNextButtonsConfig(newState);
-                  setSyncStatus('按鈕設定已更新');
-                  if (rawData && rawData.membersData) {
-                      const updatedMembers = [...rawData.membersData];
-                      const idx = updatedMembers.findIndex(m => m.name === 'SYSTEM_NEXT_BUTTONS');
-                      if (idx > -1) {
-                          updatedMembers[idx].availability_status = dbStatus;
-                      } else {
-                          updatedMembers.push({ name: 'SYSTEM_NEXT_BUTTONS', availability_status: dbStatus });
-                      }
-                      setRawData({ ...rawData, membersData: updatedMembers });
-                  }
-              } else {
-                  alert('更新失敗，請檢查權限');
-                  console.error(error);
-              }
-              setTimeout(() => setIsSyncing(false), 500);
           };
 
           const renderView = () => {
@@ -517,7 +420,6 @@
               case 'login': 
                   return <LoginView 
                       name={name} setName={setName} 
-                      password={password} setPassword={setPassword} 
                       onLogin={handleLogin} loginError={loginError} 
                       isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} 
                       seasonType={seasonType} setSeasonType={setSeasonType} seasonLabels={seasonLabels} 
@@ -525,12 +427,11 @@
                   />;
               case 'mySchedule': 
                   return <MyScheduleView 
-                      name={name} scheduleData={scheduleData} peopleData={peopleData} onLogout={handleLogout} 
+                      name={name} scheduleData={scheduleData} onLogout={handleLogout} 
                       onRequestSwap={(req) => { setSwapRequest(req); setCurrentView('swapSearch'); }} 
                       seasonType={seasonType} setSeasonType={setSeasonType} 
-                      isSyncing={isSyncing} syncStatus={syncStatus} progress={progress} seasonLabels={seasonLabels} 
-                      systemConfig={systemConfig} onToggleSystemConfig={handleToggleSystemConfig}
-                      nextButtonsConfig={nextButtonsConfig} onToggleNextButtons={handleToggleNextButtons}
+                      isSyncing={isSyncing} progress={progress} seasonLabels={seasonLabels} 
+                      systemConfig={systemConfig} nextButtonsConfig={nextButtonsConfig}
                   />;
               case 'swapSearch': 
                   return <SwapSearchView 
@@ -546,7 +447,7 @@
         }
 
         // --- Views ---
-        function LoginView({ name, setName, password, setPassword, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, systemConfig }) {
+        function LoginView({ name, setName, onLogin, loginError, isSyncing, syncStatus, progress, seasonType, setSeasonType, seasonLabels, systemConfig }) {
           return (
             <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
               <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-10 border border-white">
@@ -590,26 +491,12 @@
                 <form onSubmit={onLogin} className="space-y-4">
                   <div className="relative">
                     <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
-                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="例如：張小明" required />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="輸入同工全名" required />
                   </div>
-                  
-                  {name.trim() === 'tbcadmin' && (
-                    <div className="relative animate-in">
-                        <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
-                        <input 
-                            type="password" 
-                            value={password} 
-                            onChange={(e) => setPassword(e.target.value)} 
-                            className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" 
-                            placeholder="輸入密碼" 
-                            required 
-                        />
-                    </div>
-                  )}
 
                   {loginError && <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold"><AlertCircle size={16} /><span>{loginError}</span></div>}
                   <button type="submit" className={`w-full text-white font-black py-5 rounded-2xl shadow-lg transition-all active:scale-95 text-lg ${seasonType === 'view' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'}`}>
-                      登入
+                      查詢班表
                   </button>
                 </form>
               </div>
@@ -617,7 +504,7 @@
           );
         }
 
-        function MyScheduleView({ name, scheduleData, peopleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, syncStatus, progress, seasonLabels, systemConfig, onToggleSystemConfig, nextButtonsConfig, onToggleNextButtons }) {
+        function MyScheduleView({ name, scheduleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, progress, seasonLabels, systemConfig, nextButtonsConfig }) {
           const [flatShifts, setFlatShifts] = useState([]);
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           const isViewAllowed = seasonType === 'view' ? systemConfig.current : systemConfig.next;
@@ -743,68 +630,6 @@
               </nav>
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
-                {name === 'tbcadmin' && (
-                  <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-[1.5rem] p-5 shadow-lg border border-slate-700 animate-in fade-in mb-6">
-                    <div className="flex flex-col gap-3">
-                      <div>
-                        <h4 className="font-black text-base flex items-center gap-2 mb-1">
-                          <Lock size={16} className="text-emerald-400" /> 控制面板
-                        </h4>
-                      </div>
-                      
-                      <div className="flex flex-col sm:flex-row gap-3 mt-2">
-                        <button
-                          onClick={() => onToggleSystemConfig('current')}
-                          type="button"
-                          className={`flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
-                            systemConfig.current 
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
-                              : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
-                          }`}
-                        >
-                          <span>服事班表 ({seasonLabels.current})</span>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${systemConfig.current ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
-                            {systemConfig.current ? 'Open' : 'Close'}
-                          </div>
-                        </button>
-
-                        <button
-                          onClick={() => onToggleSystemConfig('next')}
-                          type="button"
-                          className={`flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
-                            systemConfig.next 
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
-                              : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
-                          }`}
-                        >
-                          <span>預排班表 ({seasonLabels.next})</span>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${systemConfig.next ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-400'}`}></div>
-                            {systemConfig.next ? 'Open' : 'Close'}
-                          </div>
-                        </button>
-                      </div>
-
-                      <button
-                        onClick={onToggleNextButtons}
-                        type="button"
-                        className={`mt-1 w-full py-3 px-4 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-between border ${
-                          nextButtonsConfig 
-                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' 
-                            : 'bg-slate-500/10 text-slate-400 border-slate-500/30 hover:bg-slate-500/20'
-                        }`}
-                      >
-                        <span>預排班表(加入行事曆/換班查詢)</span>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${nextButtonsConfig ? 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.8)]' : 'bg-slate-400'}`}></div>
-                          {nextButtonsConfig ? 'Open' : 'Close'}
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                         <Calendar className={seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'} size={20} />
@@ -884,8 +709,8 @@
                       <p className="text-slate-400 font-bold text-lg">查無資料</p>
                       <p className="text-sm text-slate-300 mt-1">
                           {!isViewAllowed 
-                              ? (name === 'tbcadmin' ? '已關閉此班表前台顯示' : '系統維護中，暫停使用。') 
-                              : '目前季度沒有您的排班，好好休息'}
+                              ? '系統維護中，暫停使用。' 
+                              : '目前沒有您的排班，好好休息'}
                       </p>
                     </div>
                   )
@@ -965,7 +790,6 @@
             const requester = peopleData.find(p => p.name === targetOwner);
             const requesterShifts = [];
             scheduleData.forEach(row => {
-                const rDate = normalizeDateStr(row['日記']); // 修正原文本潛在打字問題不變動邏輯
                 const rDateActual = normalizeDateStr(row['日期']);
                 const rSession = row['堂別'];
                 Object.entries(row).forEach(([k, v]) => {
@@ -1203,7 +1027,7 @@
                       <div className="p-10 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
                         <UserX className="mx-auto mb-4 opacity-30" size={48} />
                         <p className="font-bold">找不到合適人選</p>
-                                              </div>
+                      </div>
                     )}
                   </div>
                 )}
