@@ -403,7 +403,7 @@
                 setCurrentView('mySchedule');
                 setLoginError('');
             } else {
-                setLoginError('找不到您的資料，請確認全名。');
+                setLoginError('找不到資料，再試一次');
             }
           };
 
@@ -649,7 +649,7 @@
                              </svg>
                              <div className={`absolute inset-0 flex items-center justify-center text-xs font-black ${seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'}`}>{progress}%</div>
                         </div>
-                        <h3 className="text-lg font-black text-slate-800 mb-6">資料載入中</h3>
+                        <h3 className="text-lg font-black text-slate-800 mb-6">Loading</h3>
                         <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                             <div className={`h-full rounded-full transition-all duration-300 ease-out ${seasonType === 'view' ? 'bg-indigo-500' : 'bg-emerald-500'}`} style={{ width: `${progress}%` }}></div>
                         </div>
