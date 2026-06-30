@@ -190,13 +190,7 @@
                 setProgress(10);
 
                 try {
-                    // 🛡️ 靜默登入公用唯讀帳號
-                    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-                        email: 'viewer@tbc.gmail.com',
-                        password: 'Tbc_public_viewer_2026!'
-                    });
-
-                    if (authError) {
+                                        if (authError) {
                         console.error("授權連線失敗", authError);
                         setSyncStatus('連線異常，稍後再試');
                         setTimeout(() => setIsSyncing(false), 500);
