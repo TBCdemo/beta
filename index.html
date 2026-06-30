@@ -205,7 +205,7 @@
 
                     // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
-                        fetchAll('members', '*'),
+                        fetchAll('members', 'id,name,availability_status,preferred_session,dual_service_pref,newcomer_rule,group_id'),
                         fetchAll('positions', '*'),
                         fetchAll('member_positions', '*'),
                         fetchAll('member_quarter_settings', '*')
