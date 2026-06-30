@@ -394,7 +394,7 @@
             if (!trimmedName) return setLoginError('輸入完整姓名');
 
             if (!systemConfig.current && !systemConfig.next) {
-                return setLoginError('系統維護中，暫停使用。');
+                return setLoginError('系統維護中，暫停使用');
             }
 
             const userExists = peopleData.some(p => p.name === trimmedName);
@@ -491,7 +491,7 @@
                 <form onSubmit={onLogin} className="space-y-4">
                   <div className="relative">
                     <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
-                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="輸入同工全名" required />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="輸入完整姓名" required />
                   </div>
 
                   {loginError && <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold"><AlertCircle size={16} /><span>{loginError}</span></div>}
