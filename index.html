@@ -190,15 +190,8 @@
                 setProgress(10);
 
                 try {
-                    
-                    if (authError) {
-                        console.error("授權連線失敗", authError);
-                        setSyncStatus('連線異常，稍後再試');
-                        setTimeout(() => setIsSyncing(false), 500);
-                        return;
-                    }
-
-                    // 步驟 B - 開始抓取資料
+                   
+                  // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                         fetchAll('vw_public_members', '*'),
                         fetchAll('positions', '*'),
