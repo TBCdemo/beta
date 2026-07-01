@@ -57,8 +57,8 @@
         import { createClient } from '@supabase/supabase-js';
 
         // --- Supabase 初始化設定 ---
-        const SUPABASE_URL = "https://iwmkzsredvbgcqvqlayn.supabase.co";
-        const SUPABASE_KEY = "sb_publishable_GwDMLoXcHaTzQDCcQlDuGw_4J9mwiaA";
+        const SUPABASE_URL = "https://jtjgqrqbewbgxscytkod.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_TcixlGOMSLBSZNoMNOp6Ng_B-N4Tw1K";
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         
         // --- 儲存輔助函式 ---
@@ -177,7 +177,6 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
-          // 系統開放狀態控制：預設皆開
           const [systemConfig, setSystemConfig] = useState({ current: true, next: false }); 
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
@@ -190,6 +189,8 @@
                 setProgress(10);
 
                 try {
+                    // 🟢 已移除錯誤的 authError 檢查
+
                     // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                         fetchAll('vw_public_members', '*'),
@@ -235,41 +236,36 @@
                     // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
                     const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
                     if (buttonConfigMember) {
-                        setNextButtonsConfig(buttonConfigMember.availability_status === 'ON');
+                        setNextButtonsConfig((buttonConfigMember.availability_status || '').trim().toUpperCase() === 'ON');
                     } else {
                         setNextButtonsConfig(false);
                     }
 
-                    // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
-                    // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
-let schedulesData = [];
-
-// 🟢 突破 vw_public_members 視圖限制的新寫法
-// 直接從 quarterSettingsData 中尋找帶有「系統備份檔」標記的紀錄，不再依賴 members 視圖的 ID 匹配
-const archiveQs = quarterSettingsData.filter(q => q.availability_status === '系統備份檔');
-
-archiveQs.forEach(qs => {
-    let shifts = [];
-    if (qs.unavailable_dates) {
-        try {
-            shifts = typeof qs.unavailable_dates === 'string' 
-                ? JSON.parse(qs.unavailable_dates) 
-                : qs.unavailable_dates;
-        } catch(e) {}
-    }
-    
-    shifts.forEach(shift => {
-        // 這裡依然透過 membersData 將同工 ID 轉換為姓名
-        const member = membersData.find(m => m.id === shift.m);
-        schedulesData.push({
-            service_date: shift.d,
-            session: shift.s,
-            positions: { name: shift.p },
-            members: { name: member ? member.name : '未知' }
-        });
-    });
-});
-                    }
+                    // 🟢 轉換排班資料 (繞過 vw_public_members 的全新解法)
+                    let schedulesData = [];
+                    // 直接從設定檔中尋找帶有「系統備份檔」標記的紀錄
+                    const archiveQs = quarterSettingsData.filter(q => q.availability_status === '系統備份檔');
+                    
+                    archiveQs.forEach(qs => {
+                        let shifts = [];
+                        if (qs.unavailable_dates) {
+                            try {
+                                shifts = typeof qs.unavailable_dates === 'string' 
+                                    ? JSON.parse(qs.unavailable_dates) 
+                                    : qs.unavailable_dates;
+                            } catch(e) {}
+                        }
+                        
+                        shifts.forEach(shift => {
+                            const member = membersData.find(m => String(m.id) === String(shift.m));
+                            schedulesData.push({
+                                service_date: shift.d,
+                                session: shift.s,
+                                positions: { name: shift.p },
+                                members: { name: member ? member.name : (shift.m === 'EMPTY_SLOT' ? '⚠️ 人工指派' : '未知') }
+                            });
+                        });
+                    });
 
                     setProgress(50);
                     setRawData({ membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData });
@@ -540,8 +536,8 @@ archiveQs.forEach(qs => {
               if (!dateStr) return;
               const dateObj = parseDateObj(row['日期']);
 
-              // 移除小於今天的日期過濾，保留整季資料顯示
-              // if (dateObj < today) return; 
+              // 🟢 已將日期過濾拔除，確保該季班表不因過期而消失
+              // if (dateObj < today) return;
               if (getQuarterStr(dateObj) !== targetQStr) return;
 
               const session = row['堂別'];
@@ -876,7 +872,6 @@ archiveQs.forEach(qs => {
                   const rSession = row['堂別'];
                   const rDateObj = parseDateObj(row['日期']);
                   
-                  // 為了讓換班不限於未來，這裡可以選擇是否放寬，目前依據季度過濾
                   if (rDateObj < today || getQuarterStr(rDateObj) !== targetQStr) return;
 
                   Object.entries(row).forEach(([k, v]) => {
