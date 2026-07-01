@@ -190,12 +190,7 @@
                 setProgress(10);
 
                 try {
-                    // 🛡️ 靜默登入公用唯讀帳號
-                    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-                        email: 'viewer@tbc.gmail.com',
-                        password: 'Tbc_public_viewer_2026!'
-                    });
-
+                    
                     if (authError) {
                         console.error("授權連線失敗", authError);
                         setSyncStatus('連線異常，稍後再試');
@@ -205,7 +200,7 @@
 
                     // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
-                        fetchAll('members', '*'),
+                        fetchAll('vw_public_members', '*'),
                         fetchAll('positions', '*'),
                         fetchAll('member_positions', '*'),
                         fetchAll('member_quarter_settings', '*')
