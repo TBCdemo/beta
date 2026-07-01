@@ -494,6 +494,13 @@
 
         function MyScheduleView({ name, scheduleData, onLogout, onRequestSwap, seasonType, setSeasonType, isSyncing, progress, seasonLabels, systemConfig, nextButtonsConfig }) {
           const [flatShifts, setFlatShifts] = useState([]);
+          
+          // --- 新增: 紀錄已點選「加入行事曆」的狀態 ---
+          const [addedEvents, setAddedEvents] = useState(() => {
+              const saved = getLocalData('tbc_calendar_added');
+              return saved ? JSON.parse(saved) : {};
+          });
+
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           const isViewAllowed = seasonType === 'view' ? systemConfig.current : systemConfig.next;
           const displayShifts = isViewAllowed ? flatShifts : [];
@@ -509,6 +516,14 @@
             return Object.values(groups).sort((a, b) => a.dateObj - b.dateObj);
           }, [displayShifts]);
           
+          // --- 新增: 處理按鈕點擊 ---
+          const handleCalendarClick = (shift) => {
+              const eventKey = `${shift.date}_${shift.role}_${shift.rawSession}`;
+              const newAdded = { ...addedEvents, [eventKey]: true };
+              setAddedEvents(newAdded);
+              setLocalData('tbc_calendar_added', JSON.stringify(newAdded));
+          };
+
           useEffect(() => {
             const searchName = name.trim();
             const tempShifts = [];
@@ -671,14 +686,26 @@
                                 <div className="flex flex-col sm:flex-row gap-2">
                                     {(seasonType === 'view' || (seasonType === 'next' && nextButtonsConfig)) && (
                                       <>
-                                          <a 
-                                              href={getGoogleCalendarUrl(shift)} 
-                                              target="_blank" 
-                                              rel="noopener noreferrer"
-                                              className="bg-white hover:bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-blue-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block"
-                                          >
-                                              加入行事曆
-                                          </a>
+                                          {(() => {
+                                              const eventKey = `${shift.date}_${shift.role}_${shift.rawSession}`;
+                                              const isAdded = addedEvents[eventKey];
+
+                                              return (
+                                                  <a 
+                                                      href={getGoogleCalendarUrl(shift)} 
+                                                      target="_blank" 
+                                                      rel="noopener noreferrer"
+                                                      onClick={() => handleCalendarClick(shift)}
+                                                      className={`px-3 py-1.5 rounded-lg transition-all border flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap block ${
+                                                          isAdded 
+                                                          ? 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200' 
+                                                          : 'bg-white hover:bg-blue-50 text-blue-600 border-blue-200 active:scale-95'
+                                                      }`}
+                                                  >
+                                                      {isAdded ? '已點擊加入' : '加入行事曆'}
+                                                  </a>
+                                              );
+                                          })()}
                                           <button onClick={() => onRequestSwap({ date: shift.date, role: shift.role, session: shift.rawSession, owner: name })} className="bg-white hover:bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg transition-all active:scale-95 border border-emerald-200 flex-shrink-0 shadow-sm text-xs font-bold text-center whitespace-nowrap">
                                             換班查詢
                                           </button>
