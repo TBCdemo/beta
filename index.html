@@ -13,7 +13,7 @@
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react,react-dom",
+            "lucide-react": "https://esm.sh/lucide-react?external=react,react-dom",
             "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
         }
     }
@@ -39,7 +39,7 @@
         window.onerror = function(msg, url, line, col, error) {
             const root = document.getElementById('root');
             if(root) {
-                root.innerHTML = `<div style="color:red; background:#fee; padding:20px; margin:20px; border-radius:10px; font-family:sans-serif;"><h3>❌ 應用程式錯誤</h3><p><strong>錯誤訊息:</strong> ${msg}</p><p>請檢查程式碼 import 是否完整。</p></div>`;
+                root.innerHTML = `<div style="color:red; background:#fee; padding:20px; margin:20px; border-radius:10px; font-family:sans-serif;"><h3>❌ 應用程式錯誤</h3><p><strong>錯誤訊息:</strong> ${msg}</p><p>請檢查程式碼 import 是否完整，或是確認您透過網頁伺服器(localhost)開啟。</p></div>`;
             }
             return false;
         };
@@ -57,8 +57,8 @@
         import { createClient } from '@supabase/supabase-js';
 
         // --- Supabase 初始化設定 ---
-        const SUPABASE_URL = "https://iwmkzsredvbgcqvqlayn.supabase.co";
-        const SUPABASE_KEY = "sb_publishable_GwDMLoXcHaTzQDCcQlDuGw_4J9mwiaA";
+        const SUPABASE_URL = "https://jtjgqrqbewbgxscytkod.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_TcixlGOMSLBSZNoMNOp6Ng_B-N4Tw1K";
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         
         // --- 儲存輔助函式 ---
@@ -189,7 +189,7 @@
                 setIsSyncing(true);
                 setProgress(10);
 
-               
+                try {
                     // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
                         fetchAll('vw_public_members', '*'),
@@ -198,45 +198,39 @@
                         fetchAll('member_quarter_settings', '*')
                     ]);
 
-                    // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
-                    // 🟢 將原本的 .find 修正為 .filter，確保找出資料庫中「所有」名為 SYSTEM_CONFIG 的紀錄
-const configMembers = membersData.filter(m => m.name === 'SYSTEM_CONFIG');
+                    // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態 (增強修復版)
+                    const configMembers = membersData.filter(m => m.name === 'SYSTEM_CONFIG');
 
-if (configMembers.length > 0) {
-    let hasCurrent = false;
-    let hasNext = false;
-    
-    // 走查所有符合的系統設定行，只要任一行有開啟對應權限，就視為開啟
-    configMembers.forEach(m => {
-        // 使用 trim() 和 toUpperCase() 防呆，避免資料庫有隱藏空白(如 'BOTH ') 導致比對失敗
-        const status = (m.availability_status || 'CURRENT').trim().toUpperCase();
-        
-        if (status === 'BOTH' || status === 'CURRENT' || status.includes('CURRENT') || status === 'ON') {
-            hasCurrent = true;
-        }
-        if (status === 'BOTH' || status === 'NEXT' || status.includes('NEXT') || status === 'ON') {
-            hasNext = true;
-        }
-    });
+                    if (configMembers.length > 0) {
+                        let hasCurrent = false;
+                        let hasNext = false;
+                        
+                        configMembers.forEach(m => {
+                            const status = (m.availability_status || 'CURRENT').trim().toUpperCase();
+                            if (status === 'BOTH' || status === 'CURRENT' || status.includes('CURRENT') || status === 'ON') {
+                                hasCurrent = true;
+                            }
+                            if (status === 'BOTH' || status === 'NEXT' || status.includes('NEXT') || status === 'ON') {
+                                hasNext = true;
+                            }
+                        });
 
-    const parsedConfig = {
-        current: hasCurrent,
-        next: hasNext
-    };
-    
-    setSystemConfig(parsedConfig);
-    
-    // 預設畫面導向
-    if (parsedConfig.current) {
-        setSeasonType('view');
-    } else if (parsedConfig.next) {
-        setSeasonType('next');
-    }
-} else {
-    // 萬一完全找不到時的安全預設值
-    setSystemConfig({ current: true, next: false });
-    setSeasonType('view');
-}
+                        const parsedConfig = {
+                            current: hasCurrent,
+                            next: hasNext
+                        };
+                        
+                        setSystemConfig(parsedConfig);
+                        
+                        if (parsedConfig.current) {
+                            setSeasonType('view');
+                        } else if (parsedConfig.next) {
+                            setSeasonType('next');
+                        }
+                    } else {
+                        setSystemConfig({ current: true, next: false });
+                        setSeasonType('view');
+                    }
 
                     // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
                     const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
@@ -302,7 +296,7 @@ if (configMembers.length > 0) {
               const targetQStr = seasonType === 'view' 
                   ? getQuarterStr(today) 
                   : getQuarterStr(new Date(today.getFullYear(), today.getMonth() + 3, 1));
-console.log("2026-Q3:", targetQStr, "view", seasonType);
+
               const transformedPeople = membersData
                 .filter(m => m.name && !m.name.startsWith('SYSTEM_')) 
                 .map(m => {
@@ -543,7 +537,8 @@ console.log("2026-Q3:", targetQStr, "view", seasonType);
               if (!dateStr) return;
               const dateObj = parseDateObj(row['日期']);
 
-              if (dateObj < today) return;
+              // 移除小於今天的日期過濾，保留整季資料顯示
+              // if (dateObj < today) return; 
               if (getQuarterStr(dateObj) !== targetQStr) return;
 
               const session = row['堂別'];
@@ -878,6 +873,7 @@ console.log("2026-Q3:", targetQStr, "view", seasonType);
                   const rSession = row['堂別'];
                   const rDateObj = parseDateObj(row['日期']);
                   
+                  // 為了讓換班不限於未來，這裡可以選擇是否放寬，目前依據季度過濾
                   if (rDateObj < today || getQuarterStr(rDateObj) !== targetQStr) return;
 
                   Object.entries(row).forEach(([k, v]) => {
