@@ -199,24 +199,44 @@
                     ]);
 
                     // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
-                    const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
-                    if (configMember) {
-                        const status = configMember.availability_status || 'CURRENT';
-                        const parsedConfig = {
-                            current: status === 'BOTH' || status === 'CURRENT',
-                            next: status === 'BOTH' || status === 'NEXT'
-                        };
-                        setSystemConfig(parsedConfig);
-                        
-                        if (parsedConfig.current) {
-                            setSeasonType('view');
-                        } else if (parsedConfig.next) {
-                            setSeasonType('next');
-                        }
-                    } else {
-                        setSystemConfig({ current: true, next: false });
-                        setSeasonType('view');
-                    }
+                    // 🟢 將原本的 .find 修正為 .filter，確保找出資料庫中「所有」名為 SYSTEM_CONFIG 的紀錄
+const configMembers = membersData.filter(m => m.name === 'SYSTEM_CONFIG');
+
+if (configMembers.length > 0) {
+    let hasCurrent = false;
+    let hasNext = false;
+    
+    // 走查所有符合的系統設定行，只要任一行有開啟對應權限，就視為開啟
+    configMembers.forEach(m => {
+        // 使用 trim() 和 toUpperCase() 防呆，避免資料庫有隱藏空白(如 'BOTH ') 導致比對失敗
+        const status = (m.availability_status || 'CURRENT').trim().toUpperCase();
+        
+        if (status === 'BOTH' || status === 'CURRENT' || status.includes('CURRENT') || status === 'ON') {
+            hasCurrent = true;
+        }
+        if (status === 'BOTH' || status === 'NEXT' || status.includes('NEXT') || status === 'ON') {
+            hasNext = true;
+        }
+    });
+
+    const parsedConfig = {
+        current: hasCurrent,
+        next: hasNext
+    };
+    
+    setSystemConfig(parsedConfig);
+    
+    // 預設畫面導向
+    if (parsedConfig.current) {
+        setSeasonType('view');
+    } else if (parsedConfig.next) {
+        setSeasonType('next');
+    }
+} else {
+    // 萬一完全找不到時的安全預設值
+    setSystemConfig({ current: true, next: false });
+    setSeasonType('view');
+}
 
                     // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
                     const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
