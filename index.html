@@ -241,31 +241,34 @@
                     }
 
                     // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
-                    let schedulesData = [];
-                    const archiveMem = membersData.find(m => m.name === 'SYSTEM_SCHEDULE_ARCHIVE');
-                    
-                    if (archiveMem) {
-                        const archiveQs = quarterSettingsData.filter(q => q.member_id === archiveMem.id);
-                        archiveQs.forEach(qs => {
-                            let shifts = [];
-                            if (qs.unavailable_dates) {
-                                try {
-                                    shifts = typeof qs.unavailable_dates === 'string' 
-                                        ? JSON.parse(qs.unavailable_dates) 
-                                        : qs.unavailable_dates;
-                                } catch(e) {}
-                            }
-                            
-                            shifts.forEach(shift => {
-                                const member = membersData.find(m => m.id === shift.m);
-                                schedulesData.push({
-                                    service_date: shift.d,
-                                    session: shift.s,
-                                    positions: { name: shift.p },
-                                    members: { name: member ? member.name : '未知' }
-                                });
-                            });
-                        });
+                    // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
+let schedulesData = [];
+
+// 🟢 突破 vw_public_members 視圖限制的新寫法
+// 直接從 quarterSettingsData 中尋找帶有「系統備份檔」標記的紀錄，不再依賴 members 視圖的 ID 匹配
+const archiveQs = quarterSettingsData.filter(q => q.availability_status === '系統備份檔');
+
+archiveQs.forEach(qs => {
+    let shifts = [];
+    if (qs.unavailable_dates) {
+        try {
+            shifts = typeof qs.unavailable_dates === 'string' 
+                ? JSON.parse(qs.unavailable_dates) 
+                : qs.unavailable_dates;
+        } catch(e) {}
+    }
+    
+    shifts.forEach(shift => {
+        // 這裡依然透過 membersData 將同工 ID 轉換為姓名
+        const member = membersData.find(m => m.id === shift.m);
+        schedulesData.push({
+            service_date: shift.d,
+            session: shift.s,
+            positions: { name: shift.p },
+            members: { name: member ? member.name : '未知' }
+        });
+    });
+});
                     }
 
                     setProgress(50);
