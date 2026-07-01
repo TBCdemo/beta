@@ -13,7 +13,7 @@
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "lucide-react": "https://esm.sh/lucide-react?external=react,react-dom",
+            "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react,react-dom",
             "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
         }
     }
@@ -39,7 +39,7 @@
         window.onerror = function(msg, url, line, col, error) {
             const root = document.getElementById('root');
             if(root) {
-                root.innerHTML = `<div style="color:red; background:#fee; padding:20px; margin:20px; border-radius:10px; font-family:sans-serif;"><h3>❌ 應用程式錯誤</h3><p><strong>錯誤訊息:</strong> ${msg}</p><p>請檢查程式碼 import 是否完整，或是確認您透過網頁伺服器(localhost)開啟。</p></div>`;
+                root.innerHTML = `<div style="color:red; background:#fee; padding:20px; margin:20px; border-radius:10px; font-family:sans-serif;"><h3>❌ 應用程式錯誤</h3><p><strong>錯誤訊息:</strong> ${msg}</p><p>請檢查程式碼 import 是否完整。</p></div>`;
             }
             return false;
         };
@@ -57,8 +57,8 @@
         import { createClient } from '@supabase/supabase-js';
 
         // --- Supabase 初始化設定 ---
-        const SUPABASE_URL = "https://jtjgqrqbewbgxscytkod.supabase.co";
-        const SUPABASE_KEY = "sb_publishable_TcixlGOMSLBSZNoMNOp6Ng_B-N4Tw1K";
+        const SUPABASE_URL = "https://iwmkzsredvbgcqvqlayn.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_GwDMLoXcHaTzQDCcQlDuGw_4J9mwiaA";
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         
         // --- 儲存輔助函式 ---
@@ -177,6 +177,7 @@
           const [syncStatus, setSyncStatus] = useState('');
           const [progress, setProgress] = useState(0);
           
+          // 系統開放狀態控制：預設皆開
           const [systemConfig, setSystemConfig] = useState({ current: true, next: false }); 
           const [seasonType, setSeasonType] = useState('view'); 
           const seasonLabels = useMemo(() => getSeasonLabels(), []);
@@ -189,38 +190,35 @@
                 setProgress(10);
 
                 try {
-                    // 🟢 已移除錯誤的 authError 檢查
+                    // 🛡️ 靜默登入公用唯讀帳號
+                    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                        email: 'viewer@tbc.gmail.com',
+                        password: 'Tbc_public_viewer_2026!'
+                    });
+
+                    if (authError) {
+                        console.error("授權連線失敗", authError);
+                        setSyncStatus('連線異常，稍後再試');
+                        setTimeout(() => setIsSyncing(false), 500);
+                        return;
+                    }
 
                     // 步驟 B - 開始抓取資料
                     const [membersData, positionsData, memberPositionsData, quarterSettingsData] = await Promise.all([
-                        fetchAll('vw_public_members', '*'),
+                        fetchAll('members', '*'),
                         fetchAll('positions', '*'),
                         fetchAll('member_positions', '*'),
                         fetchAll('member_quarter_settings', '*')
                     ]);
 
-                    // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態 (增強修復版)
-                    const configMembers = membersData.filter(m => m.name === 'SYSTEM_CONFIG');
-
-                    if (configMembers.length > 0) {
-                        let hasCurrent = false;
-                        let hasNext = false;
-                        
-                        configMembers.forEach(m => {
-                            const status = (m.availability_status || 'CURRENT').trim().toUpperCase();
-                            if (status === 'BOTH' || status === 'CURRENT' || status.includes('CURRENT') || status === 'ON') {
-                                hasCurrent = true;
-                            }
-                            if (status === 'BOTH' || status === 'NEXT' || status.includes('NEXT') || status === 'ON') {
-                                hasNext = true;
-                            }
-                        });
-
+                    // 🟢 尋找 SYSTEM_CONFIG 解析開關狀態
+                    const configMember = membersData.find(m => m.name === 'SYSTEM_CONFIG');
+                    if (configMember) {
+                        const status = configMember.availability_status || 'CURRENT';
                         const parsedConfig = {
-                            current: hasCurrent,
-                            next: hasNext
+                            current: status === 'BOTH' || status === 'CURRENT',
+                            next: status === 'BOTH' || status === 'NEXT'
                         };
-                        
                         setSystemConfig(parsedConfig);
                         
                         if (parsedConfig.current) {
@@ -236,36 +234,38 @@
                     // 🟢 尋找 SYSTEM_NEXT_BUTTONS 解析預排表按鈕狀態
                     const buttonConfigMember = membersData.find(m => m.name === 'SYSTEM_NEXT_BUTTONS');
                     if (buttonConfigMember) {
-                        setNextButtonsConfig((buttonConfigMember.availability_status || '').trim().toUpperCase() === 'ON');
+                        setNextButtonsConfig(buttonConfigMember.availability_status === 'ON');
                     } else {
                         setNextButtonsConfig(false);
                     }
 
-                    // 🟢 轉換排班資料 (繞過 vw_public_members 的全新解法)
+                    // 轉換排班資料 (解壓縮 SYSTEM_SCHEDULE_ARCHIVE)
                     let schedulesData = [];
-                    // 直接從設定檔中尋找帶有「系統備份檔」標記的紀錄
-                    const archiveQs = quarterSettingsData.filter(q => q.availability_status === '系統備份檔');
+                    const archiveMem = membersData.find(m => m.name === 'SYSTEM_SCHEDULE_ARCHIVE');
                     
-                    archiveQs.forEach(qs => {
-                        let shifts = [];
-                        if (qs.unavailable_dates) {
-                            try {
-                                shifts = typeof qs.unavailable_dates === 'string' 
-                                    ? JSON.parse(qs.unavailable_dates) 
-                                    : qs.unavailable_dates;
-                            } catch(e) {}
-                        }
-                        
-                        shifts.forEach(shift => {
-                            const member = membersData.find(m => String(m.id) === String(shift.m));
-                            schedulesData.push({
-                                service_date: shift.d,
-                                session: shift.s,
-                                positions: { name: shift.p },
-                                members: { name: member ? member.name : (shift.m === 'EMPTY_SLOT' ? '⚠️ 人工指派' : '未知') }
+                    if (archiveMem) {
+                        const archiveQs = quarterSettingsData.filter(q => q.member_id === archiveMem.id);
+                        archiveQs.forEach(qs => {
+                            let shifts = [];
+                            if (qs.unavailable_dates) {
+                                try {
+                                    shifts = typeof qs.unavailable_dates === 'string' 
+                                        ? JSON.parse(qs.unavailable_dates) 
+                                        : qs.unavailable_dates;
+                                } catch(e) {}
+                            }
+                            
+                            shifts.forEach(shift => {
+                                const member = membersData.find(m => m.id === shift.m);
+                                schedulesData.push({
+                                    service_date: shift.d,
+                                    session: shift.s,
+                                    positions: { name: shift.p },
+                                    members: { name: member ? member.name : '未知' }
+                                });
                             });
                         });
-                    });
+                    }
 
                     setProgress(50);
                     setRawData({ membersData, positionsData, memberPositionsData, schedulesData, quarterSettingsData });
@@ -394,7 +394,7 @@
             if (!trimmedName) return setLoginError('輸入完整姓名');
 
             if (!systemConfig.current && !systemConfig.next) {
-                return setLoginError('系統維護中，暫停使用');
+                return setLoginError('系統維護中，暫停使用。');
             }
 
             const userExists = peopleData.some(p => p.name === trimmedName);
@@ -403,7 +403,7 @@
                 setCurrentView('mySchedule');
                 setLoginError('');
             } else {
-                setLoginError('找不到資料，再試一次');
+                setLoginError('找不到您的資料，請確認全名。');
             }
           };
 
@@ -491,12 +491,12 @@
                 <form onSubmit={onLogin} className="space-y-4">
                   <div className="relative">
                     <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
-                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="輸入完整姓名" required />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-14 pr-6 py-5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none transition-all text-xl font-bold placeholder:text-slate-300" placeholder="輸入同工全名" required />
                   </div>
 
                   {loginError && <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold"><AlertCircle size={16} /><span>{loginError}</span></div>}
                   <button type="submit" className={`w-full text-white font-black py-5 rounded-2xl shadow-lg transition-all active:scale-95 text-lg ${seasonType === 'view' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'}`}>
-                      登入
+                      查詢班表
                   </button>
                 </form>
               </div>
@@ -536,8 +536,7 @@
               if (!dateStr) return;
               const dateObj = parseDateObj(row['日期']);
 
-              // 🟢 已將日期過濾拔除，確保該季班表不因過期而消失
-              // if (dateObj < today) return;
+              if (dateObj < today) return;
               if (getQuarterStr(dateObj) !== targetQStr) return;
 
               const session = row['堂別'];
@@ -650,7 +649,7 @@
                              </svg>
                              <div className={`absolute inset-0 flex items-center justify-center text-xs font-black ${seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'}`}>{progress}%</div>
                         </div>
-                        <h3 className="text-lg font-black text-slate-800 mb-6">Loading</h3>
+                        <h3 className="text-lg font-black text-slate-800 mb-6">資料載入中</h3>
                         <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                             <div className={`h-full rounded-full transition-all duration-300 ease-out ${seasonType === 'view' ? 'bg-indigo-500' : 'bg-emerald-500'}`} style={{ width: `${progress}%` }}></div>
                         </div>
@@ -1018,7 +1017,7 @@
                                     className={`text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 font-bold ${copiedId === `${person.name}-substitute` ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100'}`}
                                 >
                                     {copiedId === `${person.name}-substitute` ? <Check size={14} strokeWidth={3}/> : <Copy size={14}/>} 
-                                    
+                                    複製
                                 </button>
                               </div>
                             )}
