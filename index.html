@@ -860,6 +860,7 @@
                       const isActiveConcurrent = compatibleRoles.includes(activeRole);
                       if (!allExistingAreConcurrent || !isActiveConcurrent) return;
                       if (shiftsThisSession.some(d => d.role === activeRole)) return;
+                      if (shiftsThisSession.length >= 2) return;
                   }
                   
                   const shiftsOtherSession = mShiftsToday.filter(d => d.session !== reqSession);
