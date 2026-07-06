@@ -902,18 +902,51 @@
               candidateShifts.forEach(shift => {
                   if (!requester || !requester.roles[shift.role]) return;
                   
+                  // 1. 取得 A 在 B 這個班次當天的所有既有服事
+                  // 2. 並且「預先扣除」A 正準備換出去的這個班次 (targetDateNorm, reqSession, reqRole)
+                  const aShiftsOnTargetDate = requesterShifts.filter(s => {
+                      if (s.date !== shift.date) return false;
+                      if (s.date === targetDateNorm && s.session === reqSession && s.role === reqRole) return false;
+                      return true;
+                  });
+                  
                   if (shift.role === '執事輪值') {
                       if (processedDeaconDates.has(shift.date)) return;
                       processedDeaconDates.add(shift.date);
                       
-                      const requesterRolesToday = requesterShifts.filter(s => s.date === shift.date).map(s => s.role);
-                      if (requesterRolesToday.includes('執事輪值')) return;
+                      // 檢查：如果 A 要接 B 的「執事輪值」，那天 A 不能有其他任何服事
+                      if (aShiftsOnTargetDate.length > 0) return;
                       
                       swapOptions.push({ date: shift.date, role: '執事輪值', session: '第一堂、第二堂' });
                   } else {
-                      const requesterRolesThisSession = requesterShifts.filter(s => s.date === shift.date && s.session === shift.session).map(s => s.role);
-                      if (requesterRolesThisSession.includes(shift.role)) return;
-                      
+                      // 檢查：A 剩下的班次中，是否已經有「執事輪值」
+                      if (aShiftsOnTargetDate.some(s => s.role === '執事輪值')) return;
+
+                      const aShiftsThisSession = aShiftsOnTargetDate.filter(s => s.session === shift.session);
+                      const aShiftsOtherSession = aShiftsOnTargetDate.filter(s => s.session !== shift.session);
+
+                      // --- 檢查 A 若接手 B 的班次，同堂別併行是否衝突 ---
+                      if (aShiftsThisSession.length > 0) {
+                          if (requesterDualPref === 0) return; // A 關閉兼任
+                          if (aShiftsThisSession.length >= 2) return; // 最多併行2個
+                          if (!compatibleRoles.includes(shift.role)) return; // B 的崗位不允許併行 (例如: 司會)
+                          if (!aShiftsThisSession.every(s => compatibleRoles.includes(s.role))) return; // A 既有的崗位不允許併行
+                          if (aShiftsThisSession.some(s => s.role === shift.role)) return; // 崗位重複
+                      }
+
+                      // --- 檢查 A 若接手 B 的班次，跨堂別兼任是否衝突 ---
+                      if (aShiftsOtherSession.length > 0) {
+                          if (requesterDualPref === 0 || requesterDualPref === null) return;
+                          const otherRoles = aShiftsOtherSession.map(s => s.role);
+                          if (requesterDualPref === 1 && !otherRoles.includes(shift.role)) return; // 限制二堂同崗
+                          if (requesterDualPref === 2 && otherRoles.includes(shift.role)) return;  // 限制二堂異崗
+                      } else if (aShiftsThisSession.length === 0) {
+                          // 如果這天 A 完全沒有其他班次，套用 A 的「單堂偏好」
+                          if ((requesterDualPref === 0 || requesterDualPref === null) && requester.session && requester.session !== '皆可') {
+                              if (!requester.session.includes(shift.session.replace('堂', ''))) return;
+                          }
+                      }
+
                       swapOptions.push({ date: shift.date, role: shift.role, session: shift.session });
                   }
               });
