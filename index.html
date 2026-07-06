@@ -801,6 +801,9 @@
             });
 
             const requester = peopleData.find(p => p.name === targetOwner);
+            // [新增] 解析發起換班者 (A) 的請假日期
+            const requesterUnavailDates = requester?.unavailable ? requester.unavailable.split(',').map(d => normalizeDateStr(d.trim())) : [];
+            
             const requesterShifts = [];
             scheduleData.forEach(row => {
                 const rDateActual = normalizeDateStr(row['日期']);
@@ -898,10 +901,13 @@
               });
 
               // --- 修正後的雙向換班衝突防呆檢查核心邏輯 ---
-              const requesterDualPref = requester.rawDualPref ?? null;
+              const requesterDualPref = requester?.rawDualPref ?? null;
 
               candidateShifts.forEach(shift => {
                   if (!requester || !requester.roles[shift.role]) return;
+                  
+                  // --- [新增防呆]：如果 A (發起者) 在 B 的這天班次已經請假了，該班次不列入互換選項 ---
+                  if (requesterUnavailDates.includes(shift.date)) return;
                   
                   // 1. 篩選出 A (發起者) 在 B 這個班次當天的服事
                   // 2. 並且「預先扣除」A 正準備拿出來跟 B 換的當前班次 (避免自我衝突誤判)
