@@ -499,6 +499,9 @@
               return saved ? JSON.parse(saved) : {};
           });
 
+          // --- 新增: 一次加入全部服事到行事曆（.ics 下載）相關狀態 ---
+          const [showImportGuide, setShowImportGuide] = useState(false);
+
           const numberedRoles = ['接待', '收奉獻', '主餐', '新朋友關懷']; 
           const isViewAllowed = seasonType === 'view' ? systemConfig.current : systemConfig.next;
           const displayShifts = isViewAllowed ? flatShifts : [];
@@ -520,6 +523,90 @@
               const newAdded = { ...addedEvents, [eventKey]: true };
               setAddedEvents(newAdded);
               setLocalData('tbc_calendar_added', JSON.stringify(newAdded));
+          };
+
+          // --- 新增: 批次加入行事曆（產生 .ics 檔） ---
+          const getShiftTimeRange = (shift) => {
+              let startTime = '090000';
+              let endTime = '103000';
+              const s = shift.session.toUpperCase();
+              if (s.includes('S1') || s.includes('第一堂')) {
+                  startTime = '090000'; endTime = '103000';
+              } else if (s.includes('S2') || s.includes('第二堂')) {
+                  startTime = '110000'; endTime = '123000';
+              } else if (s.includes('S3') || s.includes('第三堂')) {
+                  startTime = '130000'; endTime = '143000';
+              }
+              return { startTime, endTime };
+          };
+
+          const escapeICSText = (str) => String(str || '')
+              .replace(/\\/g, '\\\\')
+              .replace(/;/g, '\\;')
+              .replace(/,/g, '\\,')
+              .replace(/\n/g, '\\n');
+
+          const generateICS = (shifts) => {
+              const now = new Date();
+              const pad = (n) => String(n).padStart(2, '0');
+              const dtstamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+
+              const lines = [
+                  'BEGIN:VCALENDAR',
+                  'VERSION:2.0',
+                  'PRODID:-//TBC//主日服事查詢系統//ZH-TW',
+                  'CALSCALE:GREGORIAN',
+                  'METHOD:PUBLISH'
+              ];
+
+              shifts.forEach((shift, idx) => {
+                  const year = shift.dateObj.getFullYear();
+                  const month = pad(shift.dateObj.getMonth() + 1);
+                  const day = pad(shift.dateObj.getDate());
+                  const dateStr = `${year}${month}${day}`;
+                  const { startTime, endTime } = getShiftTimeRange(shift);
+                  const uid = `tbc-${dateStr}-${idx}-${(name || '').replace(/\s+/g, '')}@tbc-schedule`;
+
+                  lines.push(
+                      'BEGIN:VEVENT',
+                      `UID:${escapeICSText(uid)}`,
+                      `DTSTAMP:${dtstamp}`,
+                      `DTSTART;TZID=Asia/Taipei:${dateStr}T${startTime}`,
+                      `DTEND;TZID=Asia/Taipei:${dateStr}T${endTime}`,
+                      `SUMMARY:${escapeICSText(shift.role)}`,
+                      `DESCRIPTION:${escapeICSText(`台中浸信會主日服事: ${shift.role}\n堂數: ${shift.session}`)}`,
+                      'END:VEVENT'
+                  );
+              });
+
+              lines.push('END:VCALENDAR');
+              return lines.join('\r\n');
+          };
+
+          const handleDownloadAllICS = () => {
+              if (displayShifts.length === 0) return;
+
+              const icsContent = generateICS(displayShifts);
+              const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              const rangeLabel = seasonType === 'view' ? seasonLabels.current : seasonLabels.next;
+              link.download = `TBC服事班表_${name}_${rangeLabel}.ics`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(url);
+
+              const newAdded = { ...addedEvents };
+              displayShifts.forEach(shift => {
+                  const eventKey = `${shift.date}_${shift.role}_${shift.rawSession}`;
+                  newAdded[eventKey] = true;
+              });
+              setAddedEvents(newAdded);
+              setLocalData('tbc_calendar_added', JSON.stringify(newAdded));
+
+              setShowImportGuide(true);
           };
 
           useEffect(() => {
@@ -631,14 +718,38 @@
               </nav>
 
               <main className="flex-grow p-4 sm:p-6 space-y-4 max-w-2xl mx-auto w-full">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
                         <Calendar className={seasonType === 'view' ? 'text-indigo-500' : 'text-emerald-500'} size={20} />
                         <h3 className="text-lg sm:text-xl font-bold text-slate-800">
                             {seasonType === 'view' ? `${seasonLabels.current} 服事班表` : `${seasonLabels.next} 預排班表`}
                         </h3>
                     </div>
+                    {!isSyncing && isViewAllowed && displayShifts.length > 0 && (seasonType === 'view' || (seasonType === 'next' && nextButtonsConfig)) && (
+                        <button
+                            onClick={handleDownloadAllICS}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 text-white ${seasonType === 'view' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                        >
+                            <CalendarPlus size={14} />
+                            一次加入全部服事（{displayShifts.length}）
+                        </button>
+                    )}
                 </div>
+
+                {showImportGuide && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex gap-3 items-start animate-in fade-in relative">
+                        <Info size={18} className="text-blue-500 mt-0.5 shrink-0" />
+                        <div className="text-sm text-blue-700 font-semibold leading-relaxed pr-6">
+                            <p className="mb-1">行事曆檔案（.ics）已下載，請依你的行事曆匯入：</p>
+                            <p className="mb-0.5">📱 <span className="font-black">Google 日曆：</span>電腦版開啟 calendar.google.com，點左側「其他日曆」旁的「＋」→「匯入」，選擇剛下載的檔案。</p>
+                            <p className="mb-0.5">🍎 <span className="font-black">iPhone / Apple 日曆：</span>直接開啟下載的 .ics 檔案，點「加入所有」即可。</p>
+                            <p>💻 <span className="font-black">Outlook：</span>「檔案」→「開啟並匯出」→「匯入/匯出」→選擇該 .ics 檔案。</p>
+                        </div>
+                        <button onClick={() => setShowImportGuide(false)} className="absolute top-3 right-3 text-blue-400 hover:text-blue-600">
+                            <X size={16} />
+                        </button>
+                    </div>
+                )}
 
                 {isSyncing ? (
                   <div className="flex flex-col items-center justify-center py-20 animate-in fade-in">
